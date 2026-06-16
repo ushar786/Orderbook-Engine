@@ -53,5 +53,27 @@ Prices and quantities are unsigned integers. In a real venue these should repres
 ```sh
 cargo fmt
 cargo test
+cargo clippy --all-targets -- -D warnings
 cargo bench
+```
+
+## Rust Workflow
+
+This repo is configured as a Rust-first project:
+
+- `rust-toolchain.toml` pins the stable toolchain with `rustfmt` and `clippy`.
+- `rustfmt.toml` keeps formatting consistent.
+- `.cargo/config.toml` adds aliases:
+  - `cargo dev`
+  - `cargo t`
+  - `cargo check-all`
+  - `cargo b`
+- `unsafe_code` is forbidden for this engine.
+
+Recommended local loop:
+
+```sh
+cargo fmt
+cargo test
+cargo check-all
 ```

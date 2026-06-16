@@ -3,6 +3,20 @@ name = "orderbook-engine"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+authors = ["ushar786"]
+description = "A Rust-first orderbook matching engine with REST, WebSocket, SQLite audit storage, and a static dashboard."
+repository = "https://github.com/ushar786/Orderbook-Engine"
+keywords = ["rust", "orderbook", "matching-engine", "trading"]
+categories = ["finance", "web-programming"]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }

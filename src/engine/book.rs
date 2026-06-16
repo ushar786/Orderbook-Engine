@@ -319,7 +319,9 @@ impl OrderBook {
     }
 
     fn rest(&mut self, order: Order) {
-        let price = order.price.expect("resting limit order always has price");
+        let Some(price) = order.price else {
+            return;
+        };
         self.order_index.insert(order.id, (order.side, price));
         match order.side {
             Side::Buy => self.bids.entry(Reverse(price)).or_default().push(order),
@@ -415,6 +417,7 @@ fn remove_from_level<K: Ord>(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -1,0 +1,8 @@
+[alias]
+dev = "run"
+check-all = "clippy --all-targets -- -D warnings"
+t = "test"
+b = "bench"
+
+[build]
+rustflags = ["-Dunsafe-code"]

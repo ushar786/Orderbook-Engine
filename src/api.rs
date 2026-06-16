@@ -135,13 +135,11 @@ async fn stream_events(mut socket: WebSocket, state: Arc<AppState>) {
 }
 
 async fn send_json(socket: &mut WebSocket, event: &EngineEvent) -> Result<(), axum::Error> {
-    socket
-        .send(Message::Text(
-            serde_json::to_string(event)
-                .expect("engine events are serializable")
-                .into(),
-        ))
-        .await
+    let Ok(payload) = serde_json::to_string(event) else {
+        tracing::error!("failed to serialize engine event");
+        return Ok(());
+    };
+    socket.send(Message::Text(payload.into())).await
 }
 
 #[derive(Debug, Deserialize)]
