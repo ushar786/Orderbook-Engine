@@ -1,5 +1,7 @@
-/target/
-/data/
+target/
+data/
+backend/target/
+backend/data/
 *.db
 *.db-shm
 *.db-wal

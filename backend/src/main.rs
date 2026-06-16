@@ -1,7 +1,7 @@
 mod api;
 mod db;
 
-use std::{env, error::Error, net::SocketAddr, sync::Arc};
+use std::{env, error::Error, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::Router;
 use db::Database;
@@ -40,12 +40,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let api = api::router();
+    let frontend_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../frontend");
+    let frontend_index = frontend_dir.join("index.html");
     let app = Router::new()
         .nest("/api", api)
         .route("/ws", axum::routing::get(api::ws_handler))
         .with_state(state)
         .fallback_service(
-            ServeDir::new("frontend").not_found_service(ServeFile::new("frontend/index.html")),
+            ServeDir::new(frontend_dir).not_found_service(ServeFile::new(frontend_index)),
         )
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());

@@ -7,20 +7,21 @@ The first version keeps the business surface intentionally simple: one orderbook
 ## Shape
 
 ```txt
-src/
-  engine/
-    book.rs          # matching engine and sequencing
-    order_state.rs   # lifecycle history tracking
-    errors.rs        # typed rejects
-    reject_reason.rs # validation to typed rejects
-    price_level.rs   # FIFO queue per price level
-    snapshot.rs      # book snapshot builder
-    trade.rs         # trade creation and retention
-  api.rs             # REST + WebSocket transport
-  db.rs              # SQLite audit storage
-  model.rs           # DTOs shared by engine/API/frontend
-frontend/            # static trading dashboard
-benches/             # Criterion benchmarks
+backend/
+  src/
+    engine/
+      book.rs          # matching engine and sequencing
+      order_state.rs   # lifecycle history tracking
+      errors.rs        # typed rejects
+      reject_reason.rs # validation to typed rejects
+      price_level.rs   # FIFO queue per price level
+      snapshot.rs      # book snapshot builder
+      trade.rs         # trade creation and retention
+    api.rs             # REST + WebSocket transport
+    db.rs              # SQLite audit storage
+    model.rs           # DTOs shared by engine/API/frontend
+  benches/             # Criterion benchmarks
+frontend/              # static trading dashboard
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the frontend, backend, database, and engine plan.
@@ -28,6 +29,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the frontend, backend, database, and 
 ## Run
 
 ```sh
+cd backend
 cargo run --release
 ```
 
@@ -55,6 +57,7 @@ Prices and quantities are unsigned integers. In a real venue these should repres
 ## Quality
 
 ```sh
+cd backend
 cargo fmt
 cargo test
 cargo clippy --all-targets -- -D warnings
@@ -65,9 +68,9 @@ cargo bench
 
 This repo is configured as a Rust-first project:
 
-- `rust-toolchain.toml` pins the stable toolchain with `rustfmt` and `clippy`.
-- `rustfmt.toml` keeps formatting consistent.
-- `.cargo/config.toml` adds aliases:
+- `backend/rust-toolchain.toml` pins the stable toolchain with `rustfmt` and `clippy`.
+- `backend/rustfmt.toml` keeps formatting consistent.
+- `backend/.cargo/config.toml` adds aliases:
   - `cargo dev`
   - `cargo t`
   - `cargo check-all`
@@ -77,6 +80,7 @@ This repo is configured as a Rust-first project:
 Recommended local loop:
 
 ```sh
+cd backend
 cargo fmt
 cargo test
 cargo check-all

@@ -1,24 +1,25 @@
 .PHONY: run release test fmt fmt-check lint check bench
 
 run:
-	cargo run
+	$(MAKE) -C backend run
 
 release:
-	cargo run --release
+	$(MAKE) -C backend release
 
 test:
-	cargo test
+	$(MAKE) -C backend test
 
 fmt:
-	cargo fmt
+	$(MAKE) -C backend fmt
 
 fmt-check:
-	cargo fmt --all -- --check
+	$(MAKE) -C backend fmt-check
 
 lint:
-	cargo clippy --all-targets -- -D warnings
+	$(MAKE) -C backend lint
 
-check: fmt-check lint test
+check:
+	$(MAKE) -C backend check
 
 bench:
-	cargo bench
+	$(MAKE) -C backend bench

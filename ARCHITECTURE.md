@@ -15,7 +15,7 @@ This project follows the shape of [`joaquinbejar/OrderBook-rs`](https://github.c
 Current Rust engine modules:
 
 ```txt
-src/engine/
+backend/src/engine/
   book.rs
   price_level.rs
   order_state.rs
