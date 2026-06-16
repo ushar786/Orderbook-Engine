@@ -1,53 +1,14 @@
-use std::path::Path;
-
 use rusqlite::{Connection, params};
 
 use orderbook_engine::model::{Order, OrderAck, OrderStatus, Side, Trade};
 
-#[derive(Debug)]
-pub struct Database {
-    conn: Connection,
+pub struct OrderRepository<'conn> {
+    conn: &'conn mut Connection,
 }
 
-impl Database {
-    pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
-        if let Some(parent) = path.as_ref().parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
-        }
-        let conn = Connection::open(path)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY,
-                side TEXT NOT NULL,
-                type TEXT NOT NULL,
-                price INTEGER,
-                original_quantity INTEGER NOT NULL,
-                remaining_quantity INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                created_at_seq INTEGER NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS trades (
-                id INTEGER PRIMARY KEY,
-                maker_order_id INTEGER NOT NULL,
-                taker_order_id INTEGER NOT NULL,
-                price INTEGER NOT NULL,
-                quantity INTEGER NOT NULL,
-                aggressor_side TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-            CREATE INDEX IF NOT EXISTS idx_trades_sequence ON trades(sequence);
-            "#,
-        )?;
-        Ok(Self { conn })
+impl<'conn> OrderRepository<'conn> {
+    pub fn new(conn: &'conn mut Connection) -> Self {
+        Self { conn }
     }
 
     pub fn record_ack(&mut self, ack: &OrderAck) -> rusqlite::Result<()> {
@@ -60,10 +21,20 @@ impl Database {
     }
 
     pub fn record_cancel(&mut self, order: &Order) -> rusqlite::Result<()> {
-        upsert_order(&self.conn, order, OrderStatus::Cancelled)
+        upsert_order(self.conn, order, OrderStatus::Cancelled)
+    }
+}
+
+pub struct TradeRepository<'conn> {
+    conn: &'conn Connection,
+}
+
+impl<'conn> TradeRepository<'conn> {
+    pub fn new(conn: &'conn Connection) -> Self {
+        Self { conn }
     }
 
-    pub fn recent_trades(&self, limit: usize) -> rusqlite::Result<Vec<Trade>> {
+    pub fn recent(&self, limit: usize) -> rusqlite::Result<Vec<Trade>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, maker_order_id, taker_order_id, price, quantity, aggressor_side, sequence

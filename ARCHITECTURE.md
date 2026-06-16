@@ -19,7 +19,7 @@ This project follows the shape of [`joaquinbejar/OrderBook-rs`](https://github.c
 - Add live book depth, best bid/ask/spread, recent trades, and order result states.
 - Later: add order history, cancel buttons, latency/sequence indicators, and symbol selector.
 
-## Backend Plan
+## Backend Structure
 
 - Rust + Axum server.
 - REST routes for health, submit order, cancel order, book snapshot, and recent trades.
@@ -27,13 +27,31 @@ This project follows the shape of [`joaquinbejar/OrderBook-rs`](https://github.c
 - Keep API handlers thin: validate transport, call engine, persist audit trail, publish event.
 - Later: add auth, rate limits, structured request IDs, metrics, and graceful replay on startup.
 
-## Database Plan
+Current layout:
+
+```txt
+src/api/
+  routes.rs
+  websocket.rs
+  errors.rs
+```
+
+## Database Structure
 
 - SQLite for local-first audit storage.
 - WAL mode enabled for better concurrent reads.
 - `orders` table stores lifecycle state and remaining quantity.
 - `trades` table stores immutable executions by engine sequence.
 - Later: add event journal table, snapshots table, and PostgreSQL-compatible migrations.
+
+Current layout:
+
+```txt
+src/db/
+  repository.rs
+  schema.rs
+  migrations/001_initial.sql
+```
 
 ## Engine Roadmap
 
