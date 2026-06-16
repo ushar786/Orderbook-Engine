@@ -41,6 +41,7 @@ RUST_LOG=info
 
 - `POST /api/orders` submits an order.
 - `DELETE /api/orders/:id` cancels a resting order.
+- `GET /api/orders/:id/history` returns in-memory order lifecycle history.
 - `GET /api/book` returns top-of-book depth.
 - `GET /api/trades` returns recent trades.
 - `GET /ws` streams book, trade, and order events.

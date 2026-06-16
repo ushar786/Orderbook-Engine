@@ -73,9 +73,17 @@ pub struct OrderAck {
     pub trades: Vec<Trade>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrderHistoryEntry {
+    pub sequence: u64,
+    pub status: OrderStatus,
+    pub remaining_quantity: Quantity,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderStatus {
+    Accepted,
     Filled,
     PartiallyFilled,
     Resting,

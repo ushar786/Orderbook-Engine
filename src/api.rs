@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, broadcast};
 
 use orderbook_engine::{
     engine::{MatchError, OrderBook},
-    model::{BookSnapshot, EngineEvent, NewOrder, OrderAck, OrderId, Trade},
+    model::{BookSnapshot, EngineEvent, NewOrder, OrderAck, OrderHistoryEntry, OrderId, Trade},
 };
 
 use crate::db::Database;
@@ -32,6 +32,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/book", get(book))
         .route("/orders", post(submit_order))
         .route("/orders/{id}", delete(cancel_order))
+        .route("/orders/{id}/history", get(order_history))
         .route("/trades", get(trades))
 }
 
@@ -95,6 +96,14 @@ async fn cancel_order(
     let _ = state.events.send(EngineEvent::Cancel { order_id });
     let _ = state.events.send(EngineEvent::Book { data: snapshot });
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn order_history(
+    State(state): State<Arc<AppState>>,
+    Path(order_id): Path<OrderId>,
+) -> Json<Vec<OrderHistoryEntry>> {
+    let book = state.book.lock().await;
+    Json(book.get_order_history(order_id))
 }
 
 async fn trades(
