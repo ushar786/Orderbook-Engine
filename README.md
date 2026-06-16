@@ -12,10 +12,10 @@ src/
     book.rs          # matching engine and sequencing
     errors.rs        # typed rejects
     price_level.rs   # FIFO queue per price level
-  api/               # REST + WebSocket transport
-  db/                # SQLite audit storage and migrations
+  api.rs             # REST + WebSocket transport
+  db.rs              # SQLite audit storage
   model.rs           # DTOs shared by engine/API/frontend
-frontend/src/        # static trading dashboard modules
+frontend/            # static trading dashboard
 benches/             # Criterion benchmarks
 ```
 
