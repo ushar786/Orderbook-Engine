@@ -4,7 +4,12 @@ use std::{
 };
 
 use crate::{
-    engine::{MatchError, price_level::PriceLevel},
+    engine::{
+        MatchError,
+        order_state::{self, OrderHistory},
+        price_level::PriceLevel,
+        reject_reason, snapshot, trade,
+    },
     model::{
         BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
         OrderKind, OrderStatus, Price, Quantity, Side, Trade,
@@ -47,7 +52,7 @@ pub struct OrderBook {
     bids: BTreeMap<Reverse<Price>, PriceLevel>,
     asks: BTreeMap<Price, PriceLevel>,
     order_index: HashMap<OrderId, (Side, Price)>,
-    order_history: HashMap<OrderId, Vec<OrderHistoryEntry>>,
+    order_history: OrderHistory,
     recent_trades: VecDeque<Trade>,
 }
 
@@ -74,7 +79,9 @@ impl OrderBook {
     }
 
     pub fn submit(&mut self, request: NewOrder) -> Result<MatchOutcome, MatchError> {
-        if let Err(err) = self.validate(&request) {
+        if let Err(err) =
+            reject_reason::validate_order(&request, self.config.tick_size, self.config.lot_size)
+        {
             let order_id = self.allocate_order_id();
             let rejected = Order {
                 id: order_id,
@@ -166,24 +173,13 @@ impl OrderBook {
     }
 
     pub fn snapshot(&self, depth: usize) -> BookSnapshot {
-        BookSnapshot {
-            symbol: self.config.symbol.clone(),
-            sequence: self.sequence,
-            best_bid: self.bids.keys().next().map(|price| price.0),
-            best_ask: self.asks.keys().next().copied(),
-            bids: self
-                .bids
-                .iter()
-                .take(depth)
-                .map(|(price, level)| level.snapshot(price.0))
-                .collect(),
-            asks: self
-                .asks
-                .iter()
-                .take(depth)
-                .map(|(price, level)| level.snapshot(*price))
-                .collect(),
-        }
+        snapshot::build_snapshot(
+            &self.config.symbol,
+            self.sequence,
+            &self.bids,
+            &self.asks,
+            depth,
+        )
     }
 
     pub fn engine_seq(&self) -> u64 {
@@ -199,25 +195,6 @@ impl OrderBook {
 
     pub fn active_order_count(&self) -> usize {
         self.order_index.len()
-    }
-
-    fn validate(&self, request: &NewOrder) -> Result<(), MatchError> {
-        if request.quantity == 0 {
-            return Err(MatchError::InvalidQuantity);
-        }
-        if !request.quantity.is_multiple_of(self.config.lot_size) {
-            return Err(MatchError::InvalidLot);
-        }
-        if request.kind == OrderKind::Limit {
-            let price = request
-                .price
-                .filter(|price| *price > 0)
-                .ok_or(MatchError::MissingLimitPrice)?;
-            if !price.is_multiple_of(self.config.tick_size) {
-                return Err(MatchError::InvalidTick);
-            }
-        }
-        Ok(())
     }
 
     fn match_buy(&mut self, taker: &mut Order) -> Vec<Trade> {
@@ -337,19 +314,21 @@ impl OrderBook {
         quantity: Quantity,
         aggressor_side: Side,
     ) -> Trade {
-        let trade = Trade {
-            id: self.allocate_trade_id(),
+        let sequence = self.next_sequence();
+        let trade = trade::create_trade(
+            &mut self.next_trade_id,
+            sequence,
             maker_order_id,
             taker_order_id,
             price,
             quantity,
             aggressor_side,
-            sequence: self.next_sequence(),
-        };
-        if self.recent_trades.len() == self.config.max_recent_trades {
-            self.recent_trades.pop_front();
-        }
-        self.recent_trades.push_back(trade.clone());
+        );
+        trade::retain_recent_trades(
+            &mut self.recent_trades,
+            self.config.max_recent_trades,
+            trade.clone(),
+        );
         trade
     }
 
@@ -359,26 +338,13 @@ impl OrderBook {
         id
     }
 
-    fn allocate_trade_id(&mut self) -> u64 {
-        let id = self.next_trade_id;
-        self.next_trade_id += 1;
-        id
-    }
-
     fn next_sequence(&mut self) -> u64 {
         self.sequence += 1;
         self.sequence
     }
 
     fn record_status(&mut self, order: &Order, status: OrderStatus) {
-        self.order_history
-            .entry(order.id)
-            .or_default()
-            .push(OrderHistoryEntry {
-                sequence: self.sequence,
-                status,
-                remaining_quantity: order.remaining_quantity,
-            });
+        order_state::record_status(&mut self.order_history, self.sequence, order, status);
     }
 
     fn record_maker_fill(
@@ -387,19 +353,13 @@ impl OrderBook {
         remaining_quantity: Quantity,
         maker_filled: bool,
     ) {
-        let status = if maker_filled {
-            OrderStatus::Filled
-        } else {
-            OrderStatus::PartiallyFilled
-        };
-        self.order_history
-            .entry(order_id)
-            .or_default()
-            .push(OrderHistoryEntry {
-                sequence: self.sequence,
-                status,
-                remaining_quantity,
-            });
+        order_state::record_fill(
+            &mut self.order_history,
+            self.sequence,
+            order_id,
+            remaining_quantity,
+            maker_filled,
+        );
     }
 }
 

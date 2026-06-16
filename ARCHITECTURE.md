@@ -12,6 +12,19 @@ This project follows the shape of [`joaquinbejar/OrderBook-rs`](https://github.c
 - Validation returns typed errors rather than free-form strings.
 - Benchmarks and unit tests live with the engine.
 
+Current Rust engine modules:
+
+```txt
+src/engine/
+  book.rs
+  price_level.rs
+  order_state.rs
+  reject_reason.rs
+  snapshot.rs
+  trade.rs
+  errors.rs
+```
+
 ## Frontend Plan
 
 - Keep the current static dashboard as the first usable screen.

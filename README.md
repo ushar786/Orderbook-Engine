@@ -10,8 +10,12 @@ The first version keeps the business surface intentionally simple: one orderbook
 src/
   engine/
     book.rs          # matching engine and sequencing
+    order_state.rs   # lifecycle history tracking
     errors.rs        # typed rejects
+    reject_reason.rs # validation to typed rejects
     price_level.rs   # FIFO queue per price level
+    snapshot.rs      # book snapshot builder
+    trade.rs         # trade creation and retention
   api.rs             # REST + WebSocket transport
   db.rs              # SQLite audit storage
   model.rs           # DTOs shared by engine/API/frontend
