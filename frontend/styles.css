@@ -97,6 +97,19 @@ h2 {
   text-align: center;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 10px;
+}
+
+.top-actions > span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .status.online {
   border-color: color-mix(in srgb, var(--buy), transparent 45%);
   color: var(--buy);
@@ -555,6 +568,14 @@ select:focus {
   .workspace,
   .right-rail {
     grid-template-columns: 1fr;
+  }
+
+  .top-actions {
+    justify-content: stretch;
+  }
+
+  .status {
+    flex: 1;
   }
 
   .market-strip div {

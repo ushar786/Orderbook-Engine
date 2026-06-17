@@ -13,7 +13,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast};
 
-use orderbook_engine::{
+use crate::{
+    db::Database,
     engine::{MatchError, OrderBook},
     model::{
         BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
@@ -21,8 +22,7 @@ use orderbook_engine::{
     },
 };
 
-use crate::db::Database;
-
+#[derive(Debug)]
 pub struct AppState {
     pub book: Mutex<OrderBook>,
     pub db: Mutex<Database>,
@@ -63,14 +63,20 @@ async fn submit_order(
     State(state): State<Arc<AppState>>,
     Json(request): Json<NewOrder>,
 ) -> Result<Json<OrderAck>, ApiError> {
-    let outcome = {
+    let (outcome, histories) = {
         let mut book = state.book.lock().await;
-        book.submit(request)?
+        let outcome = book.submit(request)?;
+        let histories = touched_histories(&book, &outcome.ack);
+        (outcome, histories)
     };
 
     {
         let mut db = state.db.lock().await;
         db.record_ack(&outcome.ack)?;
+        for (order_id, history) in &histories {
+            db.record_order_history(*order_id, history)?;
+        }
+        db.record_events(&outcome.events)?;
     }
 
     for event in outcome.events {
@@ -98,29 +104,47 @@ async fn cancel_order(
     State(state): State<Arc<AppState>>,
     Path(order_id): Path<OrderId>,
 ) -> Result<StatusCode, ApiError> {
-    let (cancelled, snapshot) = {
+    let (cancelled, history, snapshot) = {
         let mut book = state.book.lock().await;
         let cancelled = book.cancel(order_id)?;
+        let history = book.get_order_history(order_id);
         let snapshot = book.snapshot(25);
-        (cancelled, snapshot)
+        (cancelled, history, snapshot)
     };
+
+    let events = vec![
+        EngineEvent::Cancel { order_id },
+        EngineEvent::Book {
+            data: snapshot.clone(),
+        },
+    ];
 
     {
         let mut db = state.db.lock().await;
         db.record_cancel(&cancelled)?;
+        db.record_order_history(order_id, &history)?;
+        db.record_events(&events)?;
     }
 
-    let _ = state.events.send(EngineEvent::Cancel { order_id });
-    let _ = state.events.send(EngineEvent::Book { data: snapshot });
+    for event in events {
+        let _ = state.events.send(event);
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn order_history(
     State(state): State<Arc<AppState>>,
     Path(order_id): Path<OrderId>,
-) -> Json<Vec<OrderHistoryEntry>> {
+) -> Result<Json<Vec<OrderHistoryEntry>>, ApiError> {
     let book = state.book.lock().await;
-    Json(book.get_order_history(order_id))
+    let memory_history = book.get_order_history(order_id);
+    drop(book);
+    if !memory_history.is_empty() {
+        return Ok(Json(memory_history));
+    }
+
+    let db = state.db.lock().await;
+    Ok(Json(db.order_history(order_id)?))
 }
 
 async fn trades(
@@ -187,6 +211,20 @@ struct OrderWithStatus {
 
 fn latest_status(history: &[OrderHistoryEntry]) -> Option<OrderStatus> {
     history.last().map(|entry| entry.status)
+}
+
+fn touched_histories(book: &OrderBook, ack: &OrderAck) -> Vec<(OrderId, Vec<OrderHistoryEntry>)> {
+    let mut order_ids = Vec::with_capacity(ack.trades.len() + 1);
+    order_ids.push(ack.order.id);
+    for trade in &ack.trades {
+        if !order_ids.contains(&trade.maker_order_id) {
+            order_ids.push(trade.maker_order_id);
+        }
+    }
+    order_ids
+        .into_iter()
+        .map(|order_id| (order_id, book.get_order_history(order_id)))
+        .collect()
 }
 
 #[derive(Debug)]

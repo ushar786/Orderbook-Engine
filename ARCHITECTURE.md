@@ -49,7 +49,9 @@ backend/src/engine/
 - WAL mode enabled for better concurrent reads.
 - `orders` table stores lifecycle state and remaining quantity.
 - `trades` table stores immutable executions by engine sequence.
-- Later: add event journal table, snapshots table, and PostgreSQL-compatible migrations.
+- `order_history` stores durable lifecycle entries by order id and engine sequence.
+- `event_journal` stores replay-ready JSON events for order, trade, book, and cancel events.
+- Later: add snapshots table and PostgreSQL-compatible migrations.
 
 ## Engine Roadmap
 
@@ -58,5 +60,6 @@ backend/src/engine/
 3. Cancel and order index.
 4. Snapshot and WebSocket event stream.
 5. Active order reads for the frontend.
-6. Benchmarks for add-only, crossing, cancel, and mixed workloads.
-7. Optional risk controls, kill switch, replay journal, and metrics.
+6. Durable lifecycle/event journal persistence.
+7. Benchmarks for add-only, crossing, cancel, and mixed workloads.
+8. Optional risk controls, kill switch, replay journal recovery, and metrics.

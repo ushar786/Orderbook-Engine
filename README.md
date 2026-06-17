@@ -22,6 +22,7 @@ backend/
     db.rs              # SQLite audit storage
     model.rs           # DTOs shared by engine/API/frontend
   benches/             # Criterion benchmarks
+  tests/                # API integration tests
 frontend/              # static trading dashboard
 ```
 
@@ -78,6 +79,8 @@ This repo is configured as a Rust-first project:
   - `cargo check-all`
   - `cargo b`
 - `unsafe_code` is forbidden for this engine.
+- Criterion benchmarks cover add-only, crossing, cancel, and mixed workloads.
+- API integration tests cover matching, active orders, cancel, persisted history, and the event journal.
 
 Recommended local loop:
 

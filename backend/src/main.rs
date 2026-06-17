@@ -1,11 +1,7 @@
-mod api;
-mod db;
-
 use std::{env, error::Error, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::Router;
-use db::Database;
-use orderbook_engine::engine::OrderBook;
+use orderbook_engine::{api, api::AppState, db::Database, engine::OrderBook};
 use tokio::{net::TcpListener, signal, sync::broadcast};
 use tower_http::{
     cors::CorsLayer,
@@ -13,8 +9,6 @@ use tower_http::{
     trace::TraceLayer,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-use crate::api::AppState;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

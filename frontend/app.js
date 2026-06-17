@@ -8,6 +8,7 @@ const state = {
 
 const els = {
   status: document.querySelector("#connectionStatus"),
+  lastUpdate: document.querySelector("#lastUpdate"),
   symbol: document.querySelector("#symbol"),
   form: document.querySelector("#orderForm"),
   cancelForm: document.querySelector("#cancelForm"),
@@ -114,16 +115,18 @@ els.historyForm.addEventListener("submit", async (event) => {
   }
 });
 
-document.querySelector("#refreshBook").addEventListener("click", loadBook);
+document.querySelector("#refreshBook").addEventListener("click", refreshData);
 
 async function loadBook() {
   state.book = await requestJson("/api/book?depth=25");
   renderBook();
+  touchUpdated();
 }
 
 async function loadTrades() {
   state.trades = await requestJson("/api/trades?limit=60");
   renderTrades();
+  touchUpdated();
 }
 
 async function loadOrders() {
@@ -138,6 +141,16 @@ async function loadOrders() {
     ]),
   );
   renderOrders();
+  touchUpdated();
+}
+
+async function refreshData() {
+  try {
+    await Promise.all([loadBook(), loadTrades(), loadOrders()]);
+    setMessage("data refreshed", false);
+  } catch (error) {
+    setMessage(error.message, true);
+  }
 }
 
 function connect() {
@@ -161,6 +174,7 @@ function connect() {
     if (message.event === "book") {
       state.book = message.data;
       renderBook();
+      touchUpdated();
     }
     if (message.event === "order") {
       applyOrderAck(message.data);
@@ -379,5 +393,15 @@ function setBusy(isBusy) {
   document.querySelector("#submitOrder").disabled = isBusy;
 }
 
-await Promise.all([loadBook(), loadTrades(), loadOrders()]);
-connect();
+function touchUpdated() {
+  els.lastUpdate.textContent = `last update ${new Date().toLocaleTimeString()}`;
+}
+
+try {
+  await Promise.all([loadBook(), loadTrades(), loadOrders()]);
+  connect();
+} catch (error) {
+  els.status.textContent = "offline";
+  els.status.classList.remove("online");
+  setMessage(error.message, true);
+}
