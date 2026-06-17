@@ -11,9 +11,9 @@ use crate::{
         reject_reason, snapshot, trade,
     },
     model::{
-        BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
-        OrderKind, OrderStatus, Price, Quantity, ReplaceAck, ReplaceOrder, Side, TimeInForce,
-        Trade,
+        BookSnapshot, EngineEvent, MassCancelAck, NewOrder, Order, OrderAck, OrderHistoryEntry,
+        OrderId, OrderKind, OrderStatus, Price, Quantity, ReplaceAck, ReplaceOrder, Side,
+        TimeInForce, Trade,
     },
 };
 
@@ -173,6 +173,25 @@ impl OrderBook {
         self.next_sequence();
         self.record_status(&cancelled, OrderStatus::Cancelled);
         Ok(cancelled)
+    }
+
+    pub fn cancel_all(&mut self) -> Vec<Order> {
+        let order_ids: Vec<OrderId> = self.order_index.keys().copied().collect();
+        order_ids
+            .into_iter()
+            .filter_map(|order_id| self.cancel(order_id).ok())
+            .collect()
+    }
+
+    pub fn mass_cancel_events(cancelled: &[Order], snapshot: BookSnapshot) -> Vec<EngineEvent> {
+        vec![
+            EngineEvent::MassCancel {
+                data: MassCancelAck {
+                    cancelled_order_ids: cancelled.iter().map(|order| order.id).collect(),
+                },
+            },
+            EngineEvent::Book { data: snapshot },
+        ]
     }
 
     pub fn replace(
@@ -525,6 +544,36 @@ mod tests {
                 OrderStatus::Accepted,
                 OrderStatus::Resting,
                 OrderStatus::Cancelled
+            ]
+        );
+    }
+
+    #[test]
+    fn mass_cancel_removes_all_active_orders() {
+        let mut book = OrderBook::new("BTC-USD");
+        let buy = book.submit(limit(Side::Buy, 99, 10)).unwrap().ack.order.id;
+        let sell = book.submit(limit(Side::Sell, 101, 5)).unwrap().ack.order.id;
+
+        let cancelled = book.cancel_all();
+
+        assert_eq!(cancelled.len(), 2);
+        assert_eq!(book.active_order_count(), 0);
+        assert!(book.snapshot(5).bids.is_empty());
+        assert!(book.snapshot(5).asks.is_empty());
+        assert_eq!(
+            statuses(book.get_order_history(buy)),
+            vec![
+                OrderStatus::Accepted,
+                OrderStatus::Resting,
+                OrderStatus::Cancelled,
+            ]
+        );
+        assert_eq!(
+            statuses(book.get_order_history(sell)),
+            vec![
+                OrderStatus::Accepted,
+                OrderStatus::Resting,
+                OrderStatus::Cancelled,
             ]
         );
     }

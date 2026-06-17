@@ -33,10 +33,55 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/health", get(health))
         .route("/book", get(book))
-        .route("/orders", get(active_orders).post(submit_order))
+        .route(
+            "/orders",
+            get(active_orders)
+                .post(submit_order)
+                .delete(mass_cancel_orders),
+        )
         .route("/orders/{id}", delete(cancel_order).patch(replace_order))
         .route("/orders/{id}/history", get(order_history))
         .route("/trades", get(trades))
+}
+
+async fn mass_cancel_orders(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<crate::model::MassCancelAck>, ApiError> {
+    let (cancelled, histories, snapshot) = {
+        let mut book = state.book.lock().await;
+        let cancelled = book.cancel_all();
+        let histories = cancelled
+            .iter()
+            .map(|order| (order.id, book.get_order_history(order.id)))
+            .collect::<Vec<_>>();
+        let snapshot = book.snapshot(25);
+        (cancelled, histories, snapshot)
+    };
+
+    let events = OrderBook::mass_cancel_events(&cancelled, snapshot);
+    let ack = match events.first() {
+        Some(EngineEvent::MassCancel { data }) => data.clone(),
+        _ => crate::model::MassCancelAck {
+            cancelled_order_ids: Vec::new(),
+        },
+    };
+
+    {
+        let mut db = state.db.lock().await;
+        for order in &cancelled {
+            db.record_cancel(order)?;
+        }
+        for (order_id, history) in &histories {
+            db.record_order_history(*order_id, history)?;
+        }
+        db.record_events(&events)?;
+    }
+
+    for event in events {
+        let _ = state.events.send(event);
+    }
+
+    Ok(Json(ack))
 }
 
 async fn replace_order(

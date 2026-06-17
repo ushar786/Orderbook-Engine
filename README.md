@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one orderbook, integer tick/lot validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, REST APIs, WebSocket updates, SQLite audit storage, and a static frontend.
+The first version keeps the business surface intentionally simple: one in-memory orderbook, integer tick/lot validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, REST APIs, WebSocket updates, SQLite audit storage, and a static frontend. PostgreSQL persistence is the next Phase 2 target.
 
 ## Shape
 
@@ -28,6 +28,15 @@ frontend/              # static trading dashboard
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the frontend, backend, database, and engine plan. See [REFERENCE_ALIGNMENT.md](REFERENCE_ALIGNMENT.md) for the current match against the reference repo.
 
+## Phases
+
+```txt
+Phase 1: limit order + market order + matching + cancel
+Phase 2: Axum REST API + WebSocket frontend + PostgreSQL persistence
+Phase 3: benchmarks + snapshots + risk checks
+Phase 4: concurrency + sequencer + advanced order types
+```
+
 ## Run
 
 ```sh
@@ -49,6 +58,7 @@ RUST_LOG=info
 
 - `POST /api/orders` submits an order.
 - `GET /api/orders` returns active resting/partially-filled orders.
+- `DELETE /api/orders` mass-cancels active resting/partially-filled orders.
 - `DELETE /api/orders/:id` cancels a resting order.
 - `PATCH /api/orders/:id` cancel-replaces a resting order.
 - `GET /api/orders/:id/history` returns in-memory order lifecycle history.

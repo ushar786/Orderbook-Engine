@@ -9,14 +9,13 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Price-time priority matching with FIFO queues inside each price level.
 - Limit and market orders.
 - GTC and IOC time-in-force.
-- Order cancel, cancel-replace, active order index, and active order reads.
+- Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
 - Engine sequence numbers, trades, snapshots, and order lifecycle history.
 - Durable SQLite audit tables for orders, trades, order history, and event journal.
 - REST, WebSocket, frontend dashboard, integration tests, and Criterion benchmarks.
 
 ## Reference Features Still Missing
 
-- Mass cancel.
 - Kill switch.
 - Risk layer.
 - Self-trade prevention.
@@ -29,7 +28,8 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 
 ## Next Alignment Order
 
-1. Add mass cancel and kill switch.
-2. Add replay restore from the SQLite event journal.
+1. Complete Phase 2 with PostgreSQL persistence.
+2. Add snapshot restore for Phase 3.
 3. Add risk controls and self-trade prevention.
-4. Add metrics and allocation-focused benchmarks.
+4. Add kill switch.
+5. Add metrics and allocation-focused benchmarks.

@@ -2,6 +2,34 @@
 
 This project follows the shape of [`joaquinbejar/OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs) while keeping the first product version intentionally small.
 
+## Phase Plan
+
+Phase 1 is the single in-memory orderbook engine:
+
+- Limit orders.
+- Market orders.
+- Price-time matching.
+- Cancel.
+
+Phase 2 adds the product shell around the engine:
+
+- Axum REST API.
+- WebSocket event stream.
+- Frontend dashboard.
+- PostgreSQL persistence.
+
+Phase 3 adds operational depth:
+
+- Benchmarks.
+- Snapshots and snapshot restore.
+- Risk checks.
+
+Phase 4 adds advanced architecture:
+
+- Concurrency.
+- Dedicated sequencer.
+- Advanced order types.
+
 ## Reference Alignment
 
 - `src/engine/` is the hot path. API, database, and frontend code do not own matching rules.
@@ -41,19 +69,21 @@ backend/src/engine/
 - Rust + Axum server.
 - REST routes for health, active orders, submit order, cancel order, order history, book snapshot, and recent trades.
 - Cancel-replace is modeled as an engine operation: cancel the old resting order, then submit the replacement through the normal matcher.
+- Mass cancel uses the same cancel path for every active order so lifecycle history stays consistent.
 - WebSocket route for book/trade/order/cancel events.
 - Keep API handlers thin: validate transport, call engine, persist audit trail, publish event.
 - Later: add auth, rate limits, structured request IDs, metrics, and graceful replay on startup.
 
 ## Database Plan
 
-- SQLite for local-first audit storage.
+- SQLite for current local-first audit storage.
+- PostgreSQL is the Phase 2 target persistence layer.
 - WAL mode enabled for better concurrent reads.
 - `orders` table stores lifecycle state and remaining quantity.
 - `trades` table stores immutable executions by engine sequence.
 - `order_history` stores durable lifecycle entries by order id and engine sequence.
 - `event_journal` stores replay-ready JSON events for order, trade, book, and cancel events.
-- Later: add snapshots table and PostgreSQL-compatible migrations.
+- Later: add snapshots table, PostgreSQL migrations, and a PostgreSQL-backed repository implementation.
 
 ## Engine Roadmap
 
@@ -64,4 +94,5 @@ backend/src/engine/
 5. Active order reads for the frontend.
 6. Durable lifecycle/event journal persistence.
 7. Benchmarks for add-only, crossing, cancel, and mixed workloads.
-8. Optional risk controls, kill switch, replay journal recovery, and metrics.
+8. PostgreSQL persistence for Phase 2 completion.
+9. Optional risk controls, kill switch, replay journal recovery, and metrics.

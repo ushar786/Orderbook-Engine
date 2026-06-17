@@ -113,6 +113,11 @@ pub struct ReplaceAck {
     pub replacement: OrderAck,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MassCancelAck {
+    pub cancelled_order_ids: Vec<OrderId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrderHistoryEntry {
     pub sequence: u64,
@@ -139,4 +144,5 @@ pub enum EngineEvent {
     Replace { data: ReplaceAck },
     Trade { data: Trade },
     Cancel { order_id: OrderId },
+    MassCancel { data: MassCancelAck },
 }

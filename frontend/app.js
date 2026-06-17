@@ -118,6 +118,7 @@ els.historyForm.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#refreshBook").addEventListener("click", refreshData);
+document.querySelector("#massCancel").addEventListener("click", massCancel);
 
 async function loadBook() {
   state.book = await requestJson("/api/book?depth=25");
@@ -155,6 +156,19 @@ async function refreshData() {
   }
 }
 
+async function massCancel() {
+  try {
+    const ack = await requestJson("/api/orders", { method: "DELETE" });
+    for (const orderId of ack.cancelled_order_ids) {
+      markCancelled(orderId);
+    }
+    setMessage(`mass cancelled ${ack.cancelled_order_ids.length} orders`, false);
+    await refreshData();
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+}
+
 function connect() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -187,6 +201,9 @@ function connect() {
     }
     if (message.event === "cancel") {
       markCancelled(message.order_id);
+    }
+    if (message.event === "mass_cancel") {
+      message.data.cancelled_order_ids.forEach(markCancelled);
     }
   });
 }

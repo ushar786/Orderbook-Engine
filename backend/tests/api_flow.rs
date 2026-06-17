@@ -145,6 +145,38 @@ async fn api_replaces_resting_order() {
     );
 }
 
+#[tokio::test]
+async fn api_mass_cancels_active_orders() {
+    let (app, state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":9900,"quantity":10}"#,
+    )
+    .await;
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":10100,"quantity":4}"#,
+    )
+    .await;
+
+    let ack = request_json(app.clone(), Method::DELETE, "/api/orders", None).await;
+    assert_eq!(ack["cancelled_order_ids"].as_array().unwrap().len(), 2);
+
+    let active = get_json(app, "/api/orders").await;
+    assert!(active.as_array().unwrap().is_empty());
+
+    let db = state.db.lock().await;
+    assert_eq!(
+        db.order_history(1).unwrap().last().unwrap().status,
+        OrderStatus::Cancelled
+    );
+    assert_eq!(
+        db.order_history(2).unwrap().last().unwrap().status,
+        OrderStatus::Cancelled
+    );
+}
+
 async fn post_order(app: Router, payload: &'static str) -> serde_json::Value {
     request_json(app, Method::POST, "/api/orders", Some(payload)).await
 }

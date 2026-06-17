@@ -259,6 +259,7 @@ fn event_sequence(event: &EngineEvent) -> Option<u64> {
         EngineEvent::Replace { data } => Some(data.replacement.order.created_at_seq),
         EngineEvent::Trade { data } => Some(data.sequence),
         EngineEvent::Cancel { .. } => None,
+        EngineEvent::MassCancel { .. } => None,
     }
 }
 
@@ -269,6 +270,7 @@ fn event_type(event: &EngineEvent) -> &'static str {
         EngineEvent::Replace { .. } => "replace",
         EngineEvent::Trade { .. } => "trade",
         EngineEvent::Cancel { .. } => "cancel",
+        EngineEvent::MassCancel { .. } => "mass_cancel",
     }
 }
 

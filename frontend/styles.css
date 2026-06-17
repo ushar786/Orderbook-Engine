@@ -181,6 +181,28 @@ h2 {
   font-size: 12px;
 }
 
+.panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel-actions button {
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.panel-actions button:hover {
+  border-color: color-mix(in srgb, var(--sell), transparent 45%);
+  color: var(--sell);
+}
+
 .ticket {
   display: grid;
   gap: 14px;
