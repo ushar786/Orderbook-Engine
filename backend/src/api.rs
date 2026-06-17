@@ -8,14 +8,17 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get},
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast};
 
 use orderbook_engine::{
     engine::{MatchError, OrderBook},
-    model::{BookSnapshot, EngineEvent, NewOrder, OrderAck, OrderHistoryEntry, OrderId, Trade},
+    model::{
+        BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
+        OrderStatus, Trade,
+    },
 };
 
 use crate::db::Database;
@@ -30,7 +33,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/health", get(health))
         .route("/book", get(book))
-        .route("/orders", post(submit_order))
+        .route("/orders", get(active_orders).post(submit_order))
         .route("/orders/{id}", delete(cancel_order))
         .route("/orders/{id}/history", get(order_history))
         .route("/trades", get(trades))
@@ -75,6 +78,20 @@ async fn submit_order(
     }
 
     Ok(Json(outcome.ack))
+}
+
+async fn active_orders(State(state): State<Arc<AppState>>) -> Json<Vec<OrderWithStatus>> {
+    let book = state.book.lock().await;
+    let orders = book
+        .active_orders()
+        .into_iter()
+        .map(|order| OrderWithStatus {
+            status: latest_status(&book.get_order_history(order.id))
+                .unwrap_or(OrderStatus::Resting),
+            order,
+        })
+        .collect();
+    Json(orders)
 }
 
 async fn cancel_order(
@@ -160,6 +177,16 @@ struct Health {
 #[derive(Debug, Serialize)]
 struct ErrorBody {
     error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct OrderWithStatus {
+    order: Order,
+    status: OrderStatus,
+}
+
+fn latest_status(history: &[OrderHistoryEntry]) -> Option<OrderStatus> {
+    history.last().map(|entry| entry.status)
 }
 
 #[derive(Debug)]

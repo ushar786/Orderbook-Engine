@@ -29,14 +29,16 @@ backend/src/engine/
 ## Frontend Plan
 
 - Keep the current static dashboard as the first usable screen.
-- Add controls for limit/market, side, price, and quantity.
-- Add live book depth, best bid/ask/spread, recent trades, and order result states.
-- Later: add order history, cancel buttons, latency/sequence indicators, and symbol selector.
+- Limit/market ticket supports side, price, and quantity controls.
+- Live book depth shows best bid/ask, spread, mid price, depth levels, and sequence.
+- Recent trades, order results, cancel actions, and lifecycle history are wired to the API.
+- Active orders are loaded on refresh through `GET /api/orders`.
+- Later: add latency indicators, symbol selector, and persisted event replay.
 
 ## Backend Plan
 
 - Rust + Axum server.
-- REST routes for health, submit order, cancel order, book snapshot, and recent trades.
+- REST routes for health, active orders, submit order, cancel order, order history, book snapshot, and recent trades.
 - WebSocket route for book/trade/order/cancel events.
 - Keep API handlers thin: validate transport, call engine, persist audit trail, publish event.
 - Later: add auth, rate limits, structured request IDs, metrics, and graceful replay on startup.
@@ -55,5 +57,6 @@ backend/src/engine/
 2. Tick/lot validation.
 3. Cancel and order index.
 4. Snapshot and WebSocket event stream.
-5. Benchmarks for add-only, crossing, cancel, and mixed workloads.
-6. Optional risk controls, kill switch, replay journal, and metrics.
+5. Active order reads for the frontend.
+6. Benchmarks for add-only, crossing, cancel, and mixed workloads.
+7. Optional risk controls, kill switch, replay journal, and metrics.

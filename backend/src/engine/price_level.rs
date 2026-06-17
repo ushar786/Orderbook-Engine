@@ -29,6 +29,10 @@ impl PriceLevel {
         self.orders.is_empty()
     }
 
+    pub fn orders(&self) -> impl Iterator<Item = &Order> {
+        self.orders.iter()
+    }
+
     pub fn snapshot(&self, price: Price) -> Level {
         Level {
             price,

@@ -197,6 +197,15 @@ impl OrderBook {
         self.order_index.len()
     }
 
+    pub fn active_orders(&self) -> Vec<Order> {
+        self.bids
+            .values()
+            .chain(self.asks.values())
+            .flat_map(PriceLevel::orders)
+            .cloned()
+            .collect()
+    }
+
     fn rest(&mut self, order: Order) {
         let Some(price) = order.price else {
             return;
@@ -423,6 +432,20 @@ mod tests {
             statuses(book.get_order_history(1)),
             vec![OrderStatus::Rejected]
         );
+    }
+
+    #[test]
+    fn exposes_active_resting_orders() {
+        let mut book = OrderBook::new("BTC-USD");
+        let buy = book.submit(limit(Side::Buy, 99, 10)).unwrap().ack.order.id;
+        let sell = book.submit(limit(Side::Sell, 101, 5)).unwrap().ack.order.id;
+
+        let active = book.active_orders();
+
+        assert_eq!(active.len(), 2);
+        assert!(active.iter().any(|order| order.id == buy));
+        assert!(active.iter().any(|order| order.id == sell));
+        assert_eq!(book.active_order_count(), active.len());
     }
 
     fn statuses(history: Vec<OrderHistoryEntry>) -> Vec<OrderStatus> {

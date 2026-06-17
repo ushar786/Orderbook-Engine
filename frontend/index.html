@@ -10,13 +10,13 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">BTC-USD</p>
+          <p class="eyebrow" id="symbol">BTC-USD</p>
           <h1>Orderbook Engine</h1>
         </div>
         <div class="status" id="connectionStatus">connecting</div>
       </header>
 
-      <section class="market-strip">
+      <section class="market-strip" aria-label="Market summary">
         <div>
           <span>Best Bid</span>
           <strong id="bestBid">-</strong>
@@ -36,55 +36,107 @@
       </section>
 
       <section class="workspace">
-        <form class="ticket" id="orderForm">
-          <div class="segmented" role="group" aria-label="Side">
-            <button type="button" class="active buy" data-side="buy">Buy</button>
-            <button type="button" class="sell" data-side="sell">Sell</button>
-          </div>
+        <aside class="left-rail">
+          <form class="panel ticket" id="orderForm">
+            <div class="panel-head">
+              <h2>New Order</h2>
+              <span id="lastOrderId">ID -</span>
+            </div>
 
-          <label>
-            <span>Type</span>
-            <select id="orderType">
-              <option value="limit">Limit</option>
-              <option value="market">Market</option>
-            </select>
-          </label>
+            <div class="segmented" role="group" aria-label="Side">
+              <button type="button" class="active buy" data-side="buy">Buy</button>
+              <button type="button" class="sell" data-side="sell">Sell</button>
+            </div>
 
-          <label id="priceField">
-            <span>Price</span>
-            <input id="price" type="number" min="1" step="1" value="10000" />
-          </label>
+            <label>
+              <span>Type</span>
+              <select id="orderType">
+                <option value="limit">Limit</option>
+                <option value="market">Market</option>
+              </select>
+            </label>
 
-          <label>
-            <span>Quantity</span>
-            <input id="quantity" type="number" min="1" step="1" value="10" />
-          </label>
+            <label id="priceField">
+              <span>Price</span>
+              <input id="price" type="number" min="1" step="1" value="10000" />
+            </label>
 
-          <button class="submit" type="submit">Submit Order</button>
-          <p class="message" id="message"></p>
-        </form>
+            <label>
+              <span>Quantity</span>
+              <input id="quantity" type="number" min="1" step="1" value="10" />
+            </label>
 
-        <section class="book-panel" aria-label="Order book">
-          <div class="book-head">
+            <button class="submit" id="submitOrder" type="submit">Submit</button>
+            <p class="message" id="message" aria-live="polite"></p>
+          </form>
+
+          <section class="panel tools" aria-label="Order tools">
+            <div class="panel-head">
+              <h2>Order Tools</h2>
+            </div>
+            <form class="inline-form" id="cancelForm">
+              <label>
+                <span>Cancel ID</span>
+                <input id="cancelOrderId" type="number" min="1" step="1" placeholder="Order id" />
+              </label>
+              <button type="submit">Cancel</button>
+            </form>
+            <form class="inline-form" id="historyForm">
+              <label>
+                <span>History ID</span>
+                <input id="historyOrderId" type="number" min="1" step="1" placeholder="Order id" />
+              </label>
+              <button type="submit">Lookup</button>
+            </form>
+            <div class="history" id="history"></div>
+          </section>
+        </aside>
+
+        <section class="panel book-panel" aria-label="Order book">
+          <div class="panel-head">
             <h2>Order Book</h2>
-            <button id="refreshBook" type="button" title="Refresh book">↻</button>
+            <button class="icon-button" id="refreshBook" type="button" title="Refresh book" aria-label="Refresh book">
+              &#8635;
+            </button>
           </div>
-          <div class="book-grid">
-            <div>
-              <h3>Asks</h3>
-              <div id="asks" class="levels asks"></div>
-            </div>
-            <div>
-              <h3>Bids</h3>
-              <div id="bids" class="levels bids"></div>
-            </div>
+          <div class="book-table book-header">
+            <span>Side</span>
+            <span>Price</span>
+            <span>Quantity</span>
+            <span>Orders</span>
           </div>
+          <div id="asks" class="levels asks"></div>
+          <div class="midline">
+            <span>Mid</span>
+            <strong id="midPrice">-</strong>
+          </div>
+          <div id="bids" class="levels bids"></div>
         </section>
 
-        <section class="trades-panel" aria-label="Recent trades">
-          <h2>Trades</h2>
-          <div id="trades" class="trades"></div>
-        </section>
+        <aside class="right-rail">
+          <section class="panel orders-panel" aria-label="Orders">
+            <div class="panel-head">
+              <h2>Orders</h2>
+              <span id="orderCount">0 tracked</span>
+            </div>
+            <div class="order-table order-header">
+              <span>ID</span>
+              <span>Side</span>
+              <span>Status</span>
+              <span>Rem</span>
+              <span></span>
+            </div>
+            <div id="orders" class="orders"></div>
+          </section>
+
+          <section class="panel trades-panel" aria-label="Recent trades">
+            <div class="panel-head">
+              <h2>Trades</h2>
+              <span id="tradeCount">0</span>
+            </div>
+            <div id="trades" class="trades"></div>
+          </section>
+        </aside>
       </section>
     </main>
     <script src="/app.js" type="module"></script>

@@ -2,23 +2,36 @@ const state = {
   side: "buy",
   book: null,
   trades: [],
+  orders: new Map(),
+  reconnectTimer: null,
 };
 
 const els = {
   status: document.querySelector("#connectionStatus"),
+  symbol: document.querySelector("#symbol"),
   form: document.querySelector("#orderForm"),
+  cancelForm: document.querySelector("#cancelForm"),
+  historyForm: document.querySelector("#historyForm"),
   type: document.querySelector("#orderType"),
   price: document.querySelector("#price"),
   quantity: document.querySelector("#quantity"),
   priceField: document.querySelector("#priceField"),
+  cancelOrderId: document.querySelector("#cancelOrderId"),
+  historyOrderId: document.querySelector("#historyOrderId"),
   message: document.querySelector("#message"),
+  history: document.querySelector("#history"),
   bids: document.querySelector("#bids"),
   asks: document.querySelector("#asks"),
+  orders: document.querySelector("#orders"),
   trades: document.querySelector("#trades"),
   bestBid: document.querySelector("#bestBid"),
   bestAsk: document.querySelector("#bestAsk"),
   spread: document.querySelector("#spread"),
+  midPrice: document.querySelector("#midPrice"),
   sequence: document.querySelector("#sequence"),
+  lastOrderId: document.querySelector("#lastOrderId"),
+  orderCount: document.querySelector("#orderCount"),
+  tradeCount: document.querySelector("#tradeCount"),
 };
 
 document.querySelectorAll("[data-side]").forEach((button) => {
@@ -36,27 +49,66 @@ els.type.addEventListener("change", () => {
 
 els.form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setBusy(true);
+
   const payload = {
     side: state.side,
     type: els.type.value,
-    quantity: Number(els.quantity.value),
+    quantity: readPositiveInteger(els.quantity.value),
   };
+
+  if (!payload.quantity) {
+    setBusy(false);
+    return setMessage("quantity must be a positive integer", true);
+  }
+
   if (payload.type === "limit") {
-    payload.price = Number(els.price.value);
+    payload.price = readPositiveInteger(els.price.value);
+    if (!payload.price) {
+      setBusy(false);
+      return setMessage("price must be a positive integer", true);
+    }
   }
 
   try {
-    const response = await fetch("/api/orders", {
+    const ack = await requestJson("/api/orders", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const body = await response.json();
-    if (!response.ok) {
-      throw new Error(body.error || "order rejected");
-    }
-    setMessage(`order ${body.order.id} ${body.status}`, false);
-    await loadTrades();
+    applyOrderAck(ack);
+    setMessage(formatAck(ack), false);
+    await Promise.all([loadBook(), loadTrades()]);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    setBusy(false);
+  }
+});
+
+els.cancelForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const orderId = readPositiveInteger(els.cancelOrderId.value);
+  if (!orderId) return setMessage("cancel id must be a positive integer", true);
+
+  try {
+    await request(`/api/orders/${orderId}`, { method: "DELETE" });
+    markCancelled(orderId);
+    setMessage(`order ${orderId} cancelled`, false);
+    await loadBook();
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+});
+
+els.historyForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const orderId = readPositiveInteger(els.historyOrderId.value);
+  if (!orderId) return setMessage("history id must be a positive integer", true);
+
+  try {
+    const history = await requestJson(`/api/orders/${orderId}/history`);
+    renderHistory(orderId, history);
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -65,15 +117,27 @@ els.form.addEventListener("submit", async (event) => {
 document.querySelector("#refreshBook").addEventListener("click", loadBook);
 
 async function loadBook() {
-  const response = await fetch("/api/book?depth=25");
-  state.book = await response.json();
+  state.book = await requestJson("/api/book?depth=25");
   renderBook();
 }
 
 async function loadTrades() {
-  const response = await fetch("/api/trades?limit=40");
-  state.trades = await response.json();
+  state.trades = await requestJson("/api/trades?limit=60");
   renderTrades();
+}
+
+async function loadOrders() {
+  const activeOrders = await requestJson("/api/orders");
+  state.orders = new Map(
+    activeOrders.map(({ order, status }) => [
+      order.id,
+      {
+        ...order,
+        status,
+      },
+    ]),
+  );
+  renderOrders();
 }
 
 function connect() {
@@ -81,6 +145,7 @@ function connect() {
   const ws = new WebSocket(`${protocol}//${location.host}/ws`);
 
   ws.addEventListener("open", () => {
+    clearTimeout(state.reconnectTimer);
     els.status.textContent = "online";
     els.status.classList.add("online");
   });
@@ -88,7 +153,7 @@ function connect() {
   ws.addEventListener("close", () => {
     els.status.textContent = "reconnecting";
     els.status.classList.remove("online");
-    setTimeout(connect, 800);
+    state.reconnectTimer = setTimeout(connect, 900);
   });
 
   ws.addEventListener("message", (event) => {
@@ -97,71 +162,212 @@ function connect() {
       state.book = message.data;
       renderBook();
     }
+    if (message.event === "order") {
+      applyOrderAck(message.data);
+    }
     if (message.event === "trade") {
-      state.trades = [message.data, ...state.trades].slice(0, 40);
+      upsertTrade(message.data);
       renderTrades();
+    }
+    if (message.event === "cancel") {
+      markCancelled(message.order_id);
     }
   });
 }
 
 function renderBook() {
   if (!state.book) return;
-  els.bestBid.textContent = formatValue(state.book.best_bid);
-  els.bestAsk.textContent = formatValue(state.book.best_ask);
+
+  const { best_bid: bestBid, best_ask: bestAsk } = state.book;
+  els.symbol.textContent = state.book.symbol;
+  els.bestBid.textContent = formatValue(bestBid);
+  els.bestAsk.textContent = formatValue(bestAsk);
   els.sequence.textContent = state.book.sequence;
-  els.spread.textContent =
-    state.book.best_bid && state.book.best_ask
-      ? state.book.best_ask - state.book.best_bid
-      : "-";
-  renderLevels(els.asks, state.book.asks, "ask");
+  els.spread.textContent = bestBid && bestAsk ? formatValue(bestAsk - bestBid) : "-";
+  els.midPrice.textContent = bestBid && bestAsk ? formatDecimal((bestBid + bestAsk) / 2) : "-";
+
+  renderLevels(els.asks, [...state.book.asks].reverse(), "ask");
   renderLevels(els.bids, state.book.bids, "bid");
 }
 
-function renderLevels(target, levels) {
+function renderLevels(target, levels, side) {
   target.innerHTML = "";
   if (!levels.length) {
-    target.append(empty("No levels"));
+    target.append(empty("No levels", "book-table"));
     return;
   }
+
+  const maxQuantity = Math.max(...levels.map((level) => level.quantity), 1);
   for (const level of levels) {
     const row = document.createElement("div");
-    row.className = "level";
+    row.className = `book-table level ${side}`;
+    row.style.setProperty("--depth", `${Math.max(7, (level.quantity / maxQuantity) * 100)}%`);
     row.innerHTML = `
-      <span class="price">${level.price}</span>
-      <span class="qty">${level.quantity}</span>
-      <span class="count">${level.order_count}</span>
+      <span>${side}</span>
+      <strong>${formatValue(level.price)}</strong>
+      <span>${formatValue(level.quantity)}</span>
+      <span>${level.order_count}</span>
     `;
     target.append(row);
   }
 }
 
+function renderOrders() {
+  const orders = [...state.orders.values()].sort((a, b) => b.id - a.id).slice(0, 24);
+  els.orders.innerHTML = "";
+  els.orderCount.textContent = `${orders.length} tracked`;
+
+  if (!orders.length) {
+    els.orders.append(empty("No tracked orders", "order-table"));
+    return;
+  }
+
+  for (const order of orders) {
+    const row = document.createElement("div");
+    row.className = `order-table order-row ${order.side}`;
+    row.innerHTML = `
+      <strong>${order.id}</strong>
+      <span>${order.side}</span>
+      <span class="status-pill ${order.status}">${formatStatus(order.status)}</span>
+      <span>${order.remaining_quantity}</span>
+      <button type="button" ${canCancel(order) ? "" : "disabled"} data-cancel-id="${order.id}" title="Cancel order">x</button>
+    `;
+    els.orders.append(row);
+  }
+
+  els.orders.querySelectorAll("[data-cancel-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      els.cancelOrderId.value = button.dataset.cancelId;
+      els.cancelForm.requestSubmit();
+    });
+  });
+}
+
 function renderTrades() {
   els.trades.innerHTML = "";
+  els.tradeCount.textContent = String(state.trades.length);
+
   if (!state.trades.length) {
     els.trades.append(empty("No trades"));
     return;
   }
-  for (const trade of state.trades) {
+
+  for (const trade of state.trades.slice(0, 60)) {
     const row = document.createElement("div");
     row.className = `trade ${trade.aggressor_side}`;
     row.innerHTML = `
-      <span class="price">${trade.price}</span>
-      <span class="qty">${trade.quantity}</span>
-      <span class="side">${trade.aggressor_side}</span>
+      <strong>${formatValue(trade.price)}</strong>
+      <span>${formatValue(trade.quantity)}</span>
+      <span>${trade.aggressor_side}</span>
+      <span>#${trade.id} / seq ${trade.sequence}</span>
     `;
     els.trades.append(row);
   }
 }
 
-function empty(text) {
+function renderHistory(orderId, history) {
+  els.history.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "history-title";
+  title.textContent = `Order ${orderId}`;
+  els.history.append(title);
+
+  if (!history.length) {
+    els.history.append(empty("No history"));
+    return;
+  }
+
+  for (const item of history) {
+    const row = document.createElement("div");
+    row.className = "history-row";
+    row.innerHTML = `
+      <span>seq ${item.sequence}</span>
+      <strong>${formatStatus(item.status)}</strong>
+      <span>rem ${item.remaining_quantity}</span>
+    `;
+    els.history.append(row);
+  }
+}
+
+function applyOrderAck(ack) {
+  const order = {
+    ...ack.order,
+    status: ack.status,
+  };
+  state.orders.set(order.id, order);
+  els.lastOrderId.textContent = `ID ${order.id}`;
+  els.historyOrderId.value = order.id;
+  if (canCancel(order)) els.cancelOrderId.value = order.id;
+  ack.trades.forEach(upsertTrade);
+  renderOrders();
+  renderTrades();
+}
+
+function upsertTrade(trade) {
+  state.trades = [trade, ...state.trades.filter((item) => item.id !== trade.id)].slice(0, 60);
+}
+
+function markCancelled(orderId) {
+  const order = state.orders.get(Number(orderId));
+  if (order) {
+    state.orders.set(order.id, { ...order, status: "cancelled", remaining_quantity: 0 });
+  }
+  renderOrders();
+}
+
+function canCancel(order) {
+  return order.status === "resting" || order.status === "partially_filled";
+}
+
+async function requestJson(url, options) {
+  const response = await request(url, options);
+  return response.json();
+}
+
+async function request(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    let message = "request failed";
+    try {
+      const body = await response.json();
+      message = body.error || message;
+    } catch {
+      message = response.statusText || message;
+    }
+    throw new Error(message);
+  }
+  return response;
+}
+
+function empty(text, className = "") {
   const node = document.createElement("div");
-  node.className = "empty";
+  node.className = `empty ${className}`.trim();
   node.textContent = text;
   return node;
 }
 
+function readPositiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function formatAck(ack) {
+  const fills = ack.trades.reduce((sum, trade) => sum + trade.quantity, 0);
+  return fills > 0
+    ? `order ${ack.order.id} ${formatStatus(ack.status)} / filled ${fills}`
+    : `order ${ack.order.id} ${formatStatus(ack.status)}`;
+}
+
+function formatStatus(status) {
+  return status.replaceAll("_", " ");
+}
+
 function formatValue(value) {
   return value ?? "-";
+}
+
+function formatDecimal(value) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function setMessage(text, isError) {
@@ -169,5 +375,9 @@ function setMessage(text, isError) {
   els.message.classList.toggle("error", isError);
 }
 
-await Promise.all([loadBook(), loadTrades()]);
+function setBusy(isBusy) {
+  document.querySelector("#submitOrder").disabled = isBusy;
+}
+
+await Promise.all([loadBook(), loadTrades(), loadOrders()]);
 connect();

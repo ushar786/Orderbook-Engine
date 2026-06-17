@@ -47,11 +47,12 @@ RUST_LOG=info
 ## API
 
 - `POST /api/orders` submits an order.
+- `GET /api/orders` returns active resting/partially-filled orders.
 - `DELETE /api/orders/:id` cancels a resting order.
 - `GET /api/orders/:id/history` returns in-memory order lifecycle history.
 - `GET /api/book` returns top-of-book depth.
 - `GET /api/trades` returns recent trades.
-- `GET /ws` streams book, trade, and order events.
+- `GET /ws` upgrades to a WebSocket stream for book, trade, order, and cancel events.
 
 Prices and quantities are unsigned integers. In a real venue these should represent fixed-point ticks and lots.
 
