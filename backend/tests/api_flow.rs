@@ -39,6 +39,12 @@ fn test_app() -> (Router, Arc<AppState>) {
     (app, state)
 }
 
+fn postgres_test_url() -> Option<String> {
+    std::env::var("ORDERBOOK_TEST_POSTGRES")
+        .ok()
+        .filter(|url| url.starts_with("postgres://") || url.starts_with("postgresql://"))
+}
+
 #[tokio::test]
 async fn api_persists_matching_history_and_events() {
     let (app, state) = test_app();
@@ -82,7 +88,7 @@ async fn api_persists_matching_history_and_events() {
     let active_after_cancel = get_json(app, "/api/orders").await;
     assert!(active_after_cancel.as_array().unwrap().is_empty());
 
-    let db = state.db.lock().await;
+    let mut db = state.db.lock().await;
     assert_eq!(db.event_count().unwrap(), 7);
     assert_eq!(
         statuses(db.order_history(1).unwrap()),
@@ -130,7 +136,7 @@ async fn api_replaces_resting_order() {
     assert_eq!(active[0]["order"]["price"], 9950);
     assert_eq!(active[0]["order"]["remaining_quantity"], 4);
 
-    let db = state.db.lock().await;
+    let mut db = state.db.lock().await;
     assert_eq!(
         statuses(db.order_history(1).unwrap()),
         vec![
@@ -166,7 +172,7 @@ async fn api_mass_cancels_active_orders() {
     let active = get_json(app, "/api/orders").await;
     assert!(active.as_array().unwrap().is_empty());
 
-    let db = state.db.lock().await;
+    let mut db = state.db.lock().await;
     assert_eq!(
         db.order_history(1).unwrap().last().unwrap().status,
         OrderStatus::Cancelled
@@ -221,4 +227,13 @@ async fn response_json(response: axum::response::Response) -> serde_json::Value 
 
 fn statuses(history: Vec<OrderHistoryEntry>) -> Vec<OrderStatus> {
     history.into_iter().map(|entry| entry.status).collect()
+}
+
+#[test]
+fn postgres_backend_opens_when_configured() {
+    let Some(url) = postgres_test_url() else {
+        return;
+    };
+    let mut db = Database::open(url).unwrap();
+    assert!(db.event_count().is_ok());
 }

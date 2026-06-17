@@ -76,8 +76,9 @@ backend/src/engine/
 
 ## Database Plan
 
-- SQLite for current local-first audit storage.
-- PostgreSQL is the Phase 2 target persistence layer.
+- SQLite remains the default local-first audit storage.
+- PostgreSQL is supported alongside SQLite through `ORDERBOOK_DB=postgres://...`.
+- SQL schema copies live in `backend/migrations/sqlite` and `backend/migrations/postgres`.
 - WAL mode enabled for better concurrent reads.
 - `orders` table stores lifecycle state and remaining quantity.
 - `trades` table stores immutable executions by engine sequence.

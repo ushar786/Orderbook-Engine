@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one in-memory orderbook, integer tick/lot validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, REST APIs, WebSocket updates, SQLite audit storage, and a static frontend. PostgreSQL persistence is the next Phase 2 target.
+The first version keeps the business surface intentionally simple: one in-memory orderbook, integer tick/lot validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
 
 ## Shape
 
@@ -19,7 +19,8 @@ backend/
       snapshot.rs      # book snapshot builder
       trade.rs         # trade creation and retention
     api.rs             # REST + WebSocket transport
-    db.rs              # SQLite audit storage
+    db.rs              # SQLite/PostgreSQL audit storage
+  migrations/          # SQL schemas for both persistence backends
     model.rs           # DTOs shared by engine/API/frontend
   benches/             # Criterion benchmarks
   tests/                # API integration tests
@@ -53,6 +54,14 @@ ORDERBOOK_ADDR=127.0.0.1:8080
 ORDERBOOK_DB=data/orderbook.db
 RUST_LOG=info
 ```
+
+For PostgreSQL persistence, point `ORDERBOOK_DB` at a PostgreSQL URL:
+
+```sh
+ORDERBOOK_DB=postgres://orderbook:orderbook@localhost:5432/orderbook
+```
+
+The server creates the same schema at startup for both backends. SQL copies live in `backend/migrations/`.
 
 ## API
 

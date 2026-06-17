@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast};
 
 use crate::{
-    db::Database,
+    db::{Database, DbError},
     engine::{MatchError, OrderBook},
     model::{
         BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
@@ -222,7 +222,7 @@ async fn order_history(
         return Ok(Json(memory_history));
     }
 
-    let db = state.db.lock().await;
+    let mut db = state.db.lock().await;
     Ok(Json(db.order_history(order_id)?))
 }
 
@@ -231,7 +231,7 @@ async fn trades(
     Query(query): Query<TradeQuery>,
 ) -> Result<Json<Vec<Trade>>, ApiError> {
     let limit = query.limit.unwrap_or(50).min(200);
-    let db = state.db.lock().await;
+    let mut db = state.db.lock().await;
     Ok(Json(db.recent_trades(limit)?))
 }
 
@@ -309,7 +309,7 @@ fn touched_histories(book: &OrderBook, ack: &OrderAck) -> Vec<(OrderId, Vec<Orde
 #[derive(Debug)]
 pub enum ApiError {
     Match(MatchError),
-    Db(rusqlite::Error),
+    Db(DbError),
 }
 
 impl IntoResponse for ApiError {
@@ -337,8 +337,8 @@ impl From<MatchError> for ApiError {
     }
 }
 
-impl From<rusqlite::Error> for ApiError {
-    fn from(value: rusqlite::Error) -> Self {
+impl From<DbError> for ApiError {
+    fn from(value: DbError) -> Self {
         Self::Db(value)
     }
 }
