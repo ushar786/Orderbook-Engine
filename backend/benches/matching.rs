@@ -5,13 +5,14 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use orderbook_engine::{
     engine::OrderBook,
-    model::{NewOrder, OrderKind, Price, Quantity, Side},
+    model::{NewOrder, OrderKind, Price, Quantity, Side, TimeInForce},
 };
 
 fn limit(side: Side, price: Price, quantity: Quantity) -> NewOrder {
     NewOrder {
         side,
         kind: OrderKind::Limit,
+        time_in_force: TimeInForce::Gtc,
         price: Some(price),
         quantity,
     }
@@ -21,6 +22,7 @@ fn market(side: Side, quantity: Quantity) -> NewOrder {
     NewOrder {
         side,
         kind: OrderKind::Market,
+        time_in_force: TimeInForce::Gtc,
         price: None,
         quantity,
     }

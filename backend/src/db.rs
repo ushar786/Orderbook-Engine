@@ -3,7 +3,7 @@ use std::path::Path;
 use rusqlite::{Connection, params};
 
 use crate::model::{
-    EngineEvent, Order, OrderAck, OrderHistoryEntry, OrderId, OrderStatus, Side, Trade,
+    EngineEvent, Order, OrderAck, OrderHistoryEntry, OrderId, OrderStatus, Side, TimeInForce, Trade,
 };
 
 #[derive(Debug)]
@@ -26,6 +26,7 @@ impl Database {
                 id INTEGER PRIMARY KEY,
                 side TEXT NOT NULL,
                 type TEXT NOT NULL,
+                time_in_force TEXT NOT NULL DEFAULT 'gtc',
                 price INTEGER,
                 original_quantity INTEGER NOT NULL,
                 remaining_quantity INTEGER NOT NULL,
@@ -68,6 +69,19 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_event_journal_sequence ON event_journal(engine_sequence);
             "#,
         )?;
+        conn.execute_batch(
+            r#"
+            ALTER TABLE orders ADD COLUMN time_in_force TEXT NOT NULL DEFAULT 'gtc';
+            "#,
+        )
+        .or_else(|err| match err {
+            rusqlite::Error::SqliteFailure(_, Some(message))
+                if message.contains("duplicate column name") =>
+            {
+                Ok(())
+            }
+            other => Err(other),
+        })?;
         Ok(Self { conn })
     }
 
@@ -156,10 +170,11 @@ fn upsert_order(conn: &Connection, order: &Order, status: OrderStatus) -> rusqli
     conn.execute(
         r#"
         INSERT INTO orders (
-            id, side, type, price, original_quantity, remaining_quantity, status, created_at_seq
+            id, side, type, time_in_force, price, original_quantity, remaining_quantity, status, created_at_seq
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         ON CONFLICT(id) DO UPDATE SET
+            time_in_force = excluded.time_in_force,
             remaining_quantity = excluded.remaining_quantity,
             status = excluded.status,
             updated_at = CURRENT_TIMESTAMP
@@ -168,6 +183,7 @@ fn upsert_order(conn: &Connection, order: &Order, status: OrderStatus) -> rusqli
             order.id,
             side_to_db(order.side),
             format!("{:?}", order.kind).to_lowercase(),
+            time_in_force_to_db(order.time_in_force),
             order.price,
             order.original_quantity,
             order.remaining_quantity,
@@ -240,6 +256,7 @@ fn event_sequence(event: &EngineEvent) -> Option<u64> {
     match event {
         EngineEvent::Book { data } => Some(data.sequence),
         EngineEvent::Order { data } => Some(data.order.created_at_seq),
+        EngineEvent::Replace { data } => Some(data.replacement.order.created_at_seq),
         EngineEvent::Trade { data } => Some(data.sequence),
         EngineEvent::Cancel { .. } => None,
     }
@@ -249,6 +266,7 @@ fn event_type(event: &EngineEvent) -> &'static str {
     match event {
         EngineEvent::Book { .. } => "book",
         EngineEvent::Order { .. } => "order",
+        EngineEvent::Replace { .. } => "replace",
         EngineEvent::Trade { .. } => "trade",
         EngineEvent::Cancel { .. } => "cancel",
     }
@@ -269,6 +287,13 @@ fn status_to_db(status: OrderStatus) -> &'static str {
         OrderStatus::Resting => "resting",
         OrderStatus::Rejected => "rejected",
         OrderStatus::Cancelled => "cancelled",
+    }
+}
+
+fn time_in_force_to_db(time_in_force: TimeInForce) -> &'static str {
+    match time_in_force {
+        TimeInForce::Gtc => "gtc",
+        TimeInForce::Ioc => "ioc",
     }
 }
 

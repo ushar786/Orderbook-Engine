@@ -18,6 +18,14 @@ pub enum OrderKind {
     Market,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TimeInForce {
+    #[default]
+    Gtc,
+    Ioc,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewOrder {
     pub side: Side,
@@ -25,6 +33,31 @@ pub struct NewOrder {
     pub kind: OrderKind,
     pub quantity: Quantity,
     pub price: Option<Price>,
+    #[serde(default)]
+    pub time_in_force: TimeInForce,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplaceOrder {
+    pub side: Side,
+    #[serde(rename = "type")]
+    pub kind: OrderKind,
+    pub quantity: Quantity,
+    pub price: Option<Price>,
+    #[serde(default)]
+    pub time_in_force: TimeInForce,
+}
+
+impl From<ReplaceOrder> for NewOrder {
+    fn from(value: ReplaceOrder) -> Self {
+        Self {
+            side: value.side,
+            kind: value.kind,
+            quantity: value.quantity,
+            price: value.price,
+            time_in_force: value.time_in_force,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +65,7 @@ pub struct Order {
     pub id: OrderId,
     pub side: Side,
     pub kind: OrderKind,
+    pub time_in_force: TimeInForce,
     pub price: Option<Price>,
     pub original_quantity: Quantity,
     pub remaining_quantity: Quantity,
@@ -73,6 +107,12 @@ pub struct OrderAck {
     pub trades: Vec<Trade>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplaceAck {
+    pub cancelled_order_id: OrderId,
+    pub replacement: OrderAck,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrderHistoryEntry {
     pub sequence: u64,
@@ -96,6 +136,7 @@ pub enum OrderStatus {
 pub enum EngineEvent {
     Book { data: BookSnapshot },
     Order { data: OrderAck },
+    Replace { data: ReplaceAck },
     Trade { data: Trade },
     Cancel { order_id: OrderId },
 }

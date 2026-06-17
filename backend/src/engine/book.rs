@@ -12,7 +12,8 @@ use crate::{
     },
     model::{
         BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
-        OrderKind, OrderStatus, Price, Quantity, Side, Trade,
+        OrderKind, OrderStatus, Price, Quantity, ReplaceAck, ReplaceOrder, Side, TimeInForce,
+        Trade,
     },
 };
 
@@ -87,6 +88,7 @@ impl OrderBook {
                 id: order_id,
                 side: request.side,
                 kind: request.kind,
+                time_in_force: request.time_in_force,
                 price: request.price,
                 original_quantity: request.quantity,
                 remaining_quantity: request.quantity,
@@ -106,6 +108,7 @@ impl OrderBook {
             id: order_id,
             side: request.side,
             kind: request.kind,
+            time_in_force: request.time_in_force,
             price,
             original_quantity: request.quantity,
             remaining_quantity: request.quantity,
@@ -120,7 +123,7 @@ impl OrderBook {
 
         let status = if taker.remaining_quantity == 0 {
             OrderStatus::Filled
-        } else if taker.kind == OrderKind::Market {
+        } else if taker.kind == OrderKind::Market || taker.time_in_force == TimeInForce::Ioc {
             if trades.is_empty() {
                 OrderStatus::Rejected
             } else {
@@ -170,6 +173,25 @@ impl OrderBook {
         self.next_sequence();
         self.record_status(&cancelled, OrderStatus::Cancelled);
         Ok(cancelled)
+    }
+
+    pub fn replace(
+        &mut self,
+        order_id: OrderId,
+        replacement: ReplaceOrder,
+    ) -> Result<MatchOutcome, MatchError> {
+        self.cancel(order_id)?;
+        let mut outcome = self.submit(replacement.into())?;
+        outcome.events.insert(
+            0,
+            EngineEvent::Replace {
+                data: ReplaceAck {
+                    cancelled_order_id: order_id,
+                    replacement: outcome.ack.clone(),
+                },
+            },
+        );
+        Ok(outcome)
     }
 
     pub fn snapshot(&self, depth: usize) -> BookSnapshot {
@@ -296,6 +318,7 @@ mod tests {
         NewOrder {
             side,
             kind: OrderKind::Limit,
+            time_in_force: TimeInForce::Gtc,
             price: Some(price),
             quantity,
         }
@@ -337,6 +360,7 @@ mod tests {
             .submit(NewOrder {
                 side: Side::Buy,
                 kind: OrderKind::Market,
+                time_in_force: TimeInForce::Gtc,
                 price: None,
                 quantity: 5,
             })
@@ -446,6 +470,63 @@ mod tests {
         assert!(active.iter().any(|order| order.id == buy));
         assert!(active.iter().any(|order| order.id == sell));
         assert_eq!(book.active_order_count(), active.len());
+    }
+
+    #[test]
+    fn ioc_limit_matches_immediately_without_resting_remainder() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Sell, 100, 2)).unwrap();
+
+        let outcome = book
+            .submit(NewOrder {
+                side: Side::Buy,
+                kind: OrderKind::Limit,
+                time_in_force: TimeInForce::Ioc,
+                price: Some(100),
+                quantity: 5,
+            })
+            .unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::PartiallyFilled);
+        assert_eq!(outcome.ack.order.remaining_quantity, 3);
+        assert_eq!(book.active_order_count(), 0);
+        assert!(book.snapshot(5).bids.is_empty());
+        assert_eq!(
+            statuses(book.get_order_history(outcome.ack.order.id)),
+            vec![OrderStatus::Accepted, OrderStatus::PartiallyFilled]
+        );
+    }
+
+    #[test]
+    fn replace_cancels_existing_order_and_submits_replacement() {
+        let mut book = OrderBook::new("BTC-USD");
+        let original = book.submit(limit(Side::Buy, 99, 10)).unwrap().ack.order.id;
+
+        let outcome = book
+            .replace(
+                original,
+                ReplaceOrder {
+                    side: Side::Buy,
+                    kind: OrderKind::Limit,
+                    time_in_force: TimeInForce::Gtc,
+                    price: Some(100),
+                    quantity: 4,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Resting);
+        assert_ne!(outcome.ack.order.id, original);
+        assert_eq!(book.active_order_count(), 1);
+        assert_eq!(book.snapshot(5).best_bid, Some(100));
+        assert_eq!(
+            statuses(book.get_order_history(original)),
+            vec![
+                OrderStatus::Accepted,
+                OrderStatus::Resting,
+                OrderStatus::Cancelled
+            ]
+        );
     }
 
     fn statuses(history: Vec<OrderHistoryEntry>) -> Vec<OrderStatus> {

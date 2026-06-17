@@ -102,18 +102,67 @@ async fn api_persists_matching_history_and_events() {
     );
 }
 
+#[tokio::test]
+async fn api_replaces_resting_order() {
+    let (app, state) = test_app();
+
+    let original = post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":9900,"quantity":10}"#,
+    )
+    .await;
+    assert_eq!(original["status"], "resting");
+
+    let replace = request_json(
+        app.clone(),
+        Method::PATCH,
+        "/api/orders/1",
+        Some(r#"{"side":"buy","type":"limit","price":9950,"quantity":4}"#),
+    )
+    .await;
+
+    assert_eq!(replace["cancelled_order_id"], 1);
+    assert_eq!(replace["replacement"]["status"], "resting");
+    assert_eq!(replace["replacement"]["order"]["id"], 2);
+
+    let active = get_json(app, "/api/orders").await;
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["order"]["price"], 9950);
+    assert_eq!(active[0]["order"]["remaining_quantity"], 4);
+
+    let db = state.db.lock().await;
+    assert_eq!(
+        statuses(db.order_history(1).unwrap()),
+        vec![
+            OrderStatus::Accepted,
+            OrderStatus::Resting,
+            OrderStatus::Cancelled,
+        ]
+    );
+    assert_eq!(
+        statuses(db.order_history(2).unwrap()),
+        vec![OrderStatus::Accepted, OrderStatus::Resting]
+    );
+}
+
 async fn post_order(app: Router, payload: &'static str) -> serde_json::Value {
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method(Method::POST)
-                .uri("/api/orders")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(payload))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    request_json(app, Method::POST, "/api/orders", Some(payload)).await
+}
+
+async fn request_json(
+    app: Router,
+    method: Method,
+    uri: &str,
+    payload: Option<&'static str>,
+) -> serde_json::Value {
+    let mut builder = Request::builder().method(method).uri(uri);
+    let body = if let Some(payload) = payload {
+        builder = builder.header(header::CONTENT_TYPE, "application/json");
+        Body::from(payload)
+    } else {
+        Body::empty()
+    };
+    let response = app.oneshot(builder.body(body).unwrap()).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     response_json(response).await
 }

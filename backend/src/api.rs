@@ -18,7 +18,7 @@ use crate::{
     engine::{MatchError, OrderBook},
     model::{
         BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
-        OrderStatus, Trade,
+        OrderStatus, ReplaceAck, ReplaceOrder, Trade,
     },
 };
 
@@ -34,9 +34,43 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/health", get(health))
         .route("/book", get(book))
         .route("/orders", get(active_orders).post(submit_order))
-        .route("/orders/{id}", delete(cancel_order))
+        .route("/orders/{id}", delete(cancel_order).patch(replace_order))
         .route("/orders/{id}/history", get(order_history))
         .route("/trades", get(trades))
+}
+
+async fn replace_order(
+    State(state): State<Arc<AppState>>,
+    Path(order_id): Path<OrderId>,
+    Json(request): Json<ReplaceOrder>,
+) -> Result<Json<ReplaceAck>, ApiError> {
+    let (outcome, histories) = {
+        let mut book = state.book.lock().await;
+        let outcome = book.replace(order_id, request)?;
+        let mut histories = touched_histories(&book, &outcome.ack);
+        histories.push((order_id, book.get_order_history(order_id)));
+        (outcome, histories)
+    };
+
+    let replace_ack = ReplaceAck {
+        cancelled_order_id: order_id,
+        replacement: outcome.ack.clone(),
+    };
+
+    {
+        let mut db = state.db.lock().await;
+        db.record_ack(&outcome.ack)?;
+        for (history_order_id, history) in &histories {
+            db.record_order_history(*history_order_id, history)?;
+        }
+        db.record_events(&outcome.events)?;
+    }
+
+    for event in outcome.events {
+        let _ = state.events.send(event);
+    }
+
+    Ok(Json(replace_ack))
 }
 
 pub async fn ws_handler(

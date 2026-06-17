@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one orderbook, integer tick/lot validation, limit/market orders, FIFO matching inside each price level, REST APIs, WebSocket updates, SQLite audit storage, and a static frontend.
+The first version keeps the business surface intentionally simple: one orderbook, integer tick/lot validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, REST APIs, WebSocket updates, SQLite audit storage, and a static frontend.
 
 ## Shape
 
@@ -26,7 +26,7 @@ backend/
 frontend/              # static trading dashboard
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the frontend, backend, database, and engine plan.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the frontend, backend, database, and engine plan. See [REFERENCE_ALIGNMENT.md](REFERENCE_ALIGNMENT.md) for the current match against the reference repo.
 
 ## Run
 
@@ -50,6 +50,7 @@ RUST_LOG=info
 - `POST /api/orders` submits an order.
 - `GET /api/orders` returns active resting/partially-filled orders.
 - `DELETE /api/orders/:id` cancels a resting order.
+- `PATCH /api/orders/:id` cancel-replaces a resting order.
 - `GET /api/orders/:id/history` returns in-memory order lifecycle history.
 - `GET /api/book` returns top-of-book depth.
 - `GET /api/trades` returns recent trades.

@@ -14,6 +14,7 @@ const els = {
   cancelForm: document.querySelector("#cancelForm"),
   historyForm: document.querySelector("#historyForm"),
   type: document.querySelector("#orderType"),
+  timeInForce: document.querySelector("#timeInForce"),
   price: document.querySelector("#price"),
   quantity: document.querySelector("#quantity"),
   priceField: document.querySelector("#priceField"),
@@ -55,6 +56,7 @@ els.form.addEventListener("submit", async (event) => {
   const payload = {
     side: state.side,
     type: els.type.value,
+    time_in_force: els.timeInForce.value,
     quantity: readPositiveInteger(els.quantity.value),
   };
 
