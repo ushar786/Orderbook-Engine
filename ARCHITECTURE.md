@@ -17,6 +17,7 @@ Current Rust engine modules:
 ```txt
 backend/src/engine/
   book.rs
+  matching.rs
   price_level.rs
   order_state.rs
   reject_reason.rs

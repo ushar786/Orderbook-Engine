@@ -1,5 +1,6 @@
 mod book;
 mod errors;
+mod matching;
 mod order_state;
 mod price_level;
 mod reject_reason;

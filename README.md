@@ -11,6 +11,7 @@ backend/
   src/
     engine/
       book.rs          # matching engine and sequencing
+      matching.rs      # price-crossing and fill loop
       order_state.rs   # lifecycle history tracking
       errors.rs        # typed rejects
       reject_reason.rs # validation to typed rejects

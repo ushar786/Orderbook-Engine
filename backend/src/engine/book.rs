@@ -45,15 +45,15 @@ pub struct MatchOutcome {
 
 #[derive(Debug)]
 pub struct OrderBook {
-    config: BookConfig,
-    next_order_id: OrderId,
-    next_trade_id: u64,
-    sequence: u64,
-    bids: BTreeMap<Reverse<Price>, PriceLevel>,
-    asks: BTreeMap<Price, PriceLevel>,
-    order_index: HashMap<OrderId, (Side, Price)>,
-    order_history: OrderHistory,
-    recent_trades: VecDeque<Trade>,
+    pub(super) config: BookConfig,
+    pub(super) next_order_id: OrderId,
+    pub(super) next_trade_id: u64,
+    pub(super) sequence: u64,
+    pub(super) bids: BTreeMap<Reverse<Price>, PriceLevel>,
+    pub(super) asks: BTreeMap<Price, PriceLevel>,
+    pub(super) order_index: HashMap<OrderId, (Side, Price)>,
+    pub(super) order_history: OrderHistory,
+    pub(super) recent_trades: VecDeque<Trade>,
 }
 
 impl OrderBook {
@@ -197,104 +197,6 @@ impl OrderBook {
         self.order_index.len()
     }
 
-    fn match_buy(&mut self, taker: &mut Order) -> Vec<Trade> {
-        let mut trades = Vec::new();
-        while taker.remaining_quantity > 0 {
-            let Some(best_ask) = self.asks.keys().next().copied() else {
-                break;
-            };
-            if taker.kind == OrderKind::Limit && taker.price.is_some_and(|limit| best_ask > limit) {
-                break;
-            }
-            let Some(trade) = self.fill_at_ask(best_ask, taker) else {
-                break;
-            };
-            trades.push(trade);
-        }
-        trades
-    }
-
-    fn match_sell(&mut self, taker: &mut Order) -> Vec<Trade> {
-        let mut trades = Vec::new();
-        while taker.remaining_quantity > 0 {
-            let Some(best_bid) = self.bids.keys().next().map(|price| price.0) else {
-                break;
-            };
-            if taker.kind == OrderKind::Limit && taker.price.is_some_and(|limit| best_bid < limit) {
-                break;
-            }
-            let Some(trade) = self.fill_at_bid(best_bid, taker) else {
-                break;
-            };
-            trades.push(trade);
-        }
-        trades
-    }
-
-    fn fill_at_ask(&mut self, price: Price, taker: &mut Order) -> Option<Trade> {
-        let (maker_id, trade_quantity, maker_remaining, maker_filled, level_empty) = {
-            let level = self.asks.get_mut(&price)?;
-            let maker = level.front_mut()?;
-            let maker_id = maker.id;
-            let trade_quantity = maker.remaining_quantity.min(taker.remaining_quantity);
-            maker.remaining_quantity -= trade_quantity;
-            taker.remaining_quantity -= trade_quantity;
-            let maker_remaining = maker.remaining_quantity;
-            let maker_filled = maker.remaining_quantity == 0;
-            if maker_filled {
-                level.pop_front();
-            }
-            (
-                maker_id,
-                trade_quantity,
-                maker_remaining,
-                maker_filled,
-                level.is_empty(),
-            )
-        };
-        if level_empty {
-            self.asks.remove(&price);
-        }
-        if maker_filled {
-            self.order_index.remove(&maker_id);
-        }
-        let trade = self.trade(maker_id, taker.id, price, trade_quantity, taker.side);
-        self.record_maker_fill(maker_id, maker_remaining, maker_filled);
-        Some(trade)
-    }
-
-    fn fill_at_bid(&mut self, price: Price, taker: &mut Order) -> Option<Trade> {
-        let (maker_id, trade_quantity, maker_remaining, maker_filled, level_empty) = {
-            let level = self.bids.get_mut(&Reverse(price))?;
-            let maker = level.front_mut()?;
-            let maker_id = maker.id;
-            let trade_quantity = maker.remaining_quantity.min(taker.remaining_quantity);
-            maker.remaining_quantity -= trade_quantity;
-            taker.remaining_quantity -= trade_quantity;
-            let maker_remaining = maker.remaining_quantity;
-            let maker_filled = maker.remaining_quantity == 0;
-            if maker_filled {
-                level.pop_front();
-            }
-            (
-                maker_id,
-                trade_quantity,
-                maker_remaining,
-                maker_filled,
-                level.is_empty(),
-            )
-        };
-        if level_empty {
-            self.bids.remove(&Reverse(price));
-        }
-        if maker_filled {
-            self.order_index.remove(&maker_id);
-        }
-        let trade = self.trade(maker_id, taker.id, price, trade_quantity, taker.side);
-        self.record_maker_fill(maker_id, maker_remaining, maker_filled);
-        Some(trade)
-    }
-
     fn rest(&mut self, order: Order) {
         let Some(price) = order.price else {
             return;
@@ -306,7 +208,7 @@ impl OrderBook {
         }
     }
 
-    fn trade(
+    pub(super) fn trade(
         &mut self,
         maker_order_id: OrderId,
         taker_order_id: OrderId,
@@ -347,7 +249,7 @@ impl OrderBook {
         order_state::record_status(&mut self.order_history, self.sequence, order, status);
     }
 
-    fn record_maker_fill(
+    pub(super) fn record_maker_fill(
         &mut self,
         order_id: OrderId,
         remaining_quantity: Quantity,
