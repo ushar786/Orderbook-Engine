@@ -358,6 +358,10 @@ impl OrderBook {
             .collect()
     }
 
+    pub fn recent_trades(&self) -> Vec<Trade> {
+        self.recent_trades.iter().cloned().collect()
+    }
+
     fn rest(&mut self, order: Order) {
         let Some(price) = order.price else {
             return;

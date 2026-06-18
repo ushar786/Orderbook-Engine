@@ -11,6 +11,7 @@ backend/
   src/
     engine/
       book.rs          # matching engine and sequencing
+      command.rs       # serialized engine command worker
       matching.rs      # price-crossing and fill loop
       order_state.rs   # lifecycle history tracking
       errors.rs        # typed rejects

@@ -26,7 +26,7 @@ Phase 3 adds operational depth:
 
 Phase 4 adds advanced architecture:
 
-- Concurrency command path.
+- Serialized concurrency command worker.
 - Dedicated sequencer.
 - Advanced order types such as post-only orders.
 
@@ -46,6 +46,7 @@ Current Rust engine modules:
 ```txt
 backend/src/engine/
   book.rs
+  command.rs
   matching.rs
   price_level.rs
   order_state.rs
@@ -69,6 +70,7 @@ backend/src/engine/
 
 - Rust + Axum server.
 - REST routes for health, active orders, submit order, cancel order, order history, book snapshot, recent trades, and engine metrics.
+- Engine command worker serializes concurrent commands onto one hot-path book.
 - Replay route rebuilds the in-memory book from the latest persisted checkpoint plus durable event journal.
 - Kill switch route blocks new and replace orders while leaving cancels available.
 - Cancel-replace is modeled as an engine operation: cancel the old resting order, then submit the replacement through the normal matcher.

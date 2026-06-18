@@ -11,6 +11,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - GTC and IOC time-in-force.
 - Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
 - Dedicated in-memory sequencer, trades, enriched snapshots, and order lifecycle history.
+- Serialized command worker for concurrent producer threads.
 - Complete engine snapshot restore and deterministic event-journal replay.
 - Persisted snapshot checkpoints for faster replay startup.
 - Configurable risk checks for max quantity, max notional, max open orders, and kill switch.
@@ -29,7 +30,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 
 ## Next Alignment Order
 
-1. Add concurrent command queue around the engine.
+1. Wire API transport onto the command worker.
 2. Add self-trade prevention/account-aware policy.
 3. Add more advanced order types.
 4. Add wire protocol modules.
