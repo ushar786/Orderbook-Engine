@@ -8,7 +8,7 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get},
+    routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast};
@@ -17,8 +17,8 @@ use crate::{
     db::{Database, DbError},
     engine::{MatchError, OrderBook},
     model::{
-        BookSnapshot, EngineEvent, NewOrder, Order, OrderAck, OrderHistoryEntry, OrderId,
-        OrderStatus, ReplaceAck, ReplaceOrder, Trade,
+        BookSnapshot, EngineEvent, EngineSnapshot, NewOrder, Order, OrderAck, OrderHistoryEntry,
+        OrderId, OrderStatus, ReplaceAck, ReplaceOrder, ReplayReport, Trade,
     },
 };
 
@@ -42,6 +42,11 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/orders/{id}", delete(cancel_order).patch(replace_order))
         .route("/orders/{id}/history", get(order_history))
         .route("/trades", get(trades))
+        .route("/replay", post(replay_from_journal))
+        .route(
+            "/engine-snapshot",
+            get(engine_snapshot).post(restore_engine_snapshot),
+        )
 }
 
 async fn mass_cancel_orders(
@@ -241,6 +246,66 @@ async fn trades(
     Ok(Json(
         with_db(state.clone(), move |db| db.recent_trades(limit)).await?,
     ))
+}
+
+async fn replay_from_journal(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ReplayReport>, ApiError> {
+    let config = {
+        let book = state.book.lock().await;
+        book.config().clone()
+    };
+    let events = with_db(state.clone(), Database::events).await?;
+    let event_count = events.len();
+    let replayed = OrderBook::replay(config, events);
+    let report = ReplayReport {
+        event_count,
+        active_order_count: replayed.active_order_count(),
+        sequence: replayed.engine_seq(),
+        snapshot: replayed.snapshot(25),
+    };
+
+    {
+        let mut book = state.book.lock().await;
+        *book = replayed;
+    }
+    let _ = state.events.send(EngineEvent::Book {
+        data: report.snapshot.clone(),
+    });
+
+    Ok(Json(report))
+}
+
+async fn engine_snapshot(State(state): State<Arc<AppState>>) -> Json<EngineSnapshot> {
+    let book = state.book.lock().await;
+    Json(book.capture_snapshot())
+}
+
+async fn restore_engine_snapshot(
+    State(state): State<Arc<AppState>>,
+    Json(snapshot): Json<EngineSnapshot>,
+) -> Json<ReplayReport> {
+    let config = {
+        let book = state.book.lock().await;
+        book.config().clone()
+    };
+    let restored = OrderBook::restore_from_snapshot(config, snapshot);
+    let report = ReplayReport {
+        event_count: 0,
+        active_order_count: restored.active_order_count(),
+        sequence: restored.engine_seq(),
+        snapshot: restored.snapshot(25),
+    };
+
+    {
+        let mut book = state.book.lock().await;
+        *book = restored;
+    }
+    let _ = state.events.send(EngineEvent::Book {
+        data: report.snapshot.clone(),
+    });
+
+    Json(report)
 }
 
 async fn with_db<T, F>(state: Arc<AppState>, operation: F) -> Result<T, ApiError>

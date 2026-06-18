@@ -96,14 +96,45 @@ pub struct BookSnapshot {
     pub sequence: u64,
     pub best_bid: Option<Price>,
     pub best_ask: Option<Price>,
+    #[serde(default)]
     pub spread: Option<Price>,
+    #[serde(default)]
     pub mid_price: Option<f64>,
+    #[serde(default)]
     pub bid_depth: Quantity,
+    #[serde(default)]
     pub ask_depth: Quantity,
+    #[serde(default)]
     pub bid_order_count: usize,
+    #[serde(default)]
     pub ask_order_count: usize,
     pub bids: Vec<Level>,
     pub asks: Vec<Level>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngineSnapshot {
+    pub symbol: String,
+    pub sequence: u64,
+    pub next_order_id: OrderId,
+    pub next_trade_id: u64,
+    pub active_orders: Vec<Order>,
+    pub recent_trades: Vec<Trade>,
+    pub order_history: Vec<OrderHistorySnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderHistorySnapshot {
+    pub order_id: OrderId,
+    pub entries: Vec<OrderHistoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplayReport {
+    pub event_count: usize,
+    pub active_order_count: usize,
+    pub sequence: u64,
+    pub snapshot: BookSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,9 +11,9 @@ use crate::{
         reject_reason, snapshot, trade,
     },
     model::{
-        BookSnapshot, EngineEvent, MassCancelAck, NewOrder, Order, OrderAck, OrderHistoryEntry,
-        OrderId, OrderKind, OrderStatus, Price, Quantity, ReplaceAck, ReplaceOrder, Side,
-        TimeInForce, Trade,
+        BookSnapshot, EngineEvent, EngineSnapshot, MassCancelAck, NewOrder, Order, OrderAck,
+        OrderHistoryEntry, OrderHistorySnapshot, OrderId, OrderKind, OrderStatus, Price, Quantity,
+        ReplaceAck, ReplaceOrder, Side, TimeInForce, Trade,
     },
 };
 
@@ -240,6 +240,59 @@ impl OrderBook {
         )
     }
 
+    pub fn capture_snapshot(&self) -> EngineSnapshot {
+        let mut order_history = self
+            .order_history
+            .iter()
+            .map(|(order_id, entries)| OrderHistorySnapshot {
+                order_id: *order_id,
+                entries: entries.clone(),
+            })
+            .collect::<Vec<_>>();
+        order_history.sort_by_key(|history| history.order_id);
+
+        EngineSnapshot {
+            symbol: self.config.symbol.clone(),
+            sequence: self.sequence,
+            next_order_id: self.next_order_id,
+            next_trade_id: self.next_trade_id,
+            active_orders: self.active_orders(),
+            recent_trades: self.recent_trades.iter().cloned().collect(),
+            order_history,
+        }
+    }
+
+    pub fn restore_from_snapshot(mut config: BookConfig, snapshot: EngineSnapshot) -> Self {
+        config.symbol = snapshot.symbol;
+        let mut book = Self::with_config(config);
+        book.sequence = snapshot.sequence;
+        book.next_order_id = snapshot.next_order_id;
+        book.next_trade_id = snapshot.next_trade_id;
+        book.recent_trades = snapshot.recent_trades.into_iter().collect();
+        book.order_history = snapshot
+            .order_history
+            .into_iter()
+            .map(|history| (history.order_id, history.entries))
+            .collect();
+
+        for order in snapshot.active_orders {
+            book.rest(order);
+        }
+        book
+    }
+
+    pub fn replay(config: BookConfig, events: impl IntoIterator<Item = EngineEvent>) -> Self {
+        let mut book = Self::with_config(config);
+        for event in events {
+            book.apply_replay_event(event);
+        }
+        book
+    }
+
+    pub fn config(&self) -> &BookConfig {
+        &self.config
+    }
+
     pub fn engine_seq(&self) -> u64 {
         self.sequence
     }
@@ -272,6 +325,84 @@ impl OrderBook {
         match order.side {
             Side::Buy => self.bids.entry(Reverse(price)).or_default().push(order),
             Side::Sell => self.asks.entry(price).or_default().push(order),
+        }
+    }
+
+    fn apply_replay_event(&mut self, event: EngineEvent) {
+        match event {
+            EngineEvent::Order { data } => self.replay_order_ack(data),
+            EngineEvent::Trade { data } => self.replay_trade(data),
+            EngineEvent::Cancel { order_id } => {
+                self.remove_active_order(order_id);
+            }
+            EngineEvent::MassCancel { data } => {
+                for order_id in data.cancelled_order_ids {
+                    self.remove_active_order(order_id);
+                }
+            }
+            EngineEvent::Replace { data } => {
+                self.remove_active_order(data.cancelled_order_id);
+            }
+            EngineEvent::Book { data } => {
+                self.sequence = self.sequence.max(data.sequence);
+            }
+        }
+    }
+
+    fn replay_order_ack(&mut self, ack: OrderAck) {
+        self.sequence = self.sequence.max(ack.order.created_at_seq);
+        self.next_order_id = self.next_order_id.max(ack.order.id + 1);
+        self.record_status(&ack.order, ack.status);
+        if matches!(
+            ack.status,
+            OrderStatus::Resting | OrderStatus::PartiallyFilled
+        ) && ack.order.remaining_quantity > 0
+        {
+            self.rest(ack.order);
+        }
+    }
+
+    fn replay_trade(&mut self, trade: Trade) {
+        self.sequence = self.sequence.max(trade.sequence);
+        self.next_trade_id = self.next_trade_id.max(trade.id + 1);
+        self.reduce_active_order(trade.maker_order_id, trade.quantity);
+        trade::retain_recent_trades(
+            &mut self.recent_trades,
+            self.config.max_recent_trades,
+            trade,
+        );
+    }
+
+    fn reduce_active_order(&mut self, order_id: OrderId, quantity: Quantity) {
+        let Some((side, price)) = self.order_index.get(&order_id).copied() else {
+            return;
+        };
+        let (remaining_quantity, filled, level_empty) = match side {
+            Side::Buy => reduce_level_order(&mut self.bids, Reverse(price), order_id, quantity),
+            Side::Sell => reduce_level_order(&mut self.asks, price, order_id, quantity),
+        };
+
+        if filled {
+            self.order_index.remove(&order_id);
+        }
+        if level_empty {
+            match side {
+                Side::Buy => {
+                    self.bids.remove(&Reverse(price));
+                }
+                Side::Sell => {
+                    self.asks.remove(&price);
+                }
+            }
+        }
+        self.record_maker_fill(order_id, remaining_quantity, filled);
+    }
+
+    fn remove_active_order(&mut self, order_id: OrderId) -> Option<Order> {
+        let (side, price) = self.order_index.remove(&order_id)?;
+        match side {
+            Side::Buy => remove_from_level(&mut self.bids, Reverse(price), order_id),
+            Side::Sell => remove_from_level(&mut self.asks, price, order_id),
         }
     }
 
@@ -345,6 +476,27 @@ fn remove_from_level<K: Ord>(
     removed
 }
 
+fn reduce_level_order<K: Ord>(
+    book: &mut BTreeMap<K, PriceLevel>,
+    price: K,
+    order_id: OrderId,
+    quantity: Quantity,
+) -> (Quantity, bool, bool) {
+    let Some(level) = book.get_mut(&price) else {
+        return (0, false, false);
+    };
+    let Some(order) = level.get_mut(order_id) else {
+        return (0, false, level.is_empty());
+    };
+    order.remaining_quantity = order.remaining_quantity.saturating_sub(quantity);
+    let remaining_quantity = order.remaining_quantity;
+    let filled = remaining_quantity == 0;
+    if filled {
+        level.remove(order_id);
+    }
+    (remaining_quantity, filled, level.is_empty())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -404,6 +556,45 @@ mod tests {
 
         assert_eq!(outcome.ack.status, OrderStatus::PartiallyFilled);
         assert_eq!(book.snapshot(5).best_ask, None);
+    }
+
+    #[test]
+    fn restores_complete_engine_snapshot() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Buy, 99, 10)).unwrap();
+        book.submit(limit(Side::Sell, 101, 7)).unwrap();
+
+        let restored =
+            OrderBook::restore_from_snapshot(BookConfig::btc_usd(), book.capture_snapshot());
+
+        assert_eq!(restored.engine_seq(), book.engine_seq());
+        assert_eq!(restored.active_order_count(), book.active_order_count());
+        assert_eq!(restored.snapshot(5).bid_depth, 10);
+        assert_eq!(restored.snapshot(5).ask_depth, 7);
+        assert_eq!(restored.get_order_history(1), book.get_order_history(1));
+    }
+
+    #[test]
+    fn replays_order_trade_and_cancel_events_deterministically() {
+        let mut book = OrderBook::new("BTC-USD");
+        let mut events = Vec::new();
+        let resting = book.submit(limit(Side::Buy, 100, 5)).unwrap();
+        events.extend(resting.events);
+        let crossing = book.submit(limit(Side::Sell, 99, 2)).unwrap();
+        events.extend(crossing.events);
+        let cancelled = book.cancel(1).unwrap();
+        let snapshot = book.snapshot(5);
+        events.push(EngineEvent::Cancel {
+            order_id: cancelled.id,
+        });
+        events.push(EngineEvent::Book { data: snapshot });
+
+        let replayed = OrderBook::replay(BookConfig::btc_usd(), events);
+
+        assert_eq!(replayed.engine_seq(), book.engine_seq());
+        assert_eq!(replayed.active_order_count(), book.active_order_count());
+        assert_eq!(replayed.snapshot(5).best_bid, book.snapshot(5).best_bid);
+        assert_eq!(replayed.snapshot(5).bid_depth, book.snapshot(5).bid_depth);
     }
 
     #[test]

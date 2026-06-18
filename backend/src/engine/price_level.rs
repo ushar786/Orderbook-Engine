@@ -16,6 +16,10 @@ impl PriceLevel {
         self.orders.front_mut()
     }
 
+    pub fn get_mut(&mut self, order_id: OrderId) -> Option<&mut Order> {
+        self.orders.iter_mut().find(|order| order.id == order_id)
+    }
+
     pub fn pop_front(&mut self) -> Option<Order> {
         self.orders.pop_front()
     }

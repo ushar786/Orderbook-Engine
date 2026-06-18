@@ -183,6 +183,75 @@ async fn api_mass_cancels_active_orders() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn api_replays_event_journal_into_memory_book() {
+    let (app, _state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":10000,"quantity":5}"#,
+    )
+    .await;
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":9990,"quantity":2}"#,
+    )
+    .await;
+
+    let report = request_json(app.clone(), Method::POST, "/api/replay", None).await;
+
+    assert_eq!(report["event_count"], 5);
+    assert_eq!(report["active_order_count"], 1);
+    assert_eq!(report["snapshot"]["bid_depth"], 3);
+
+    let active = get_json(app, "/api/orders").await;
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["order"]["remaining_quantity"], 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn api_exports_and_restores_engine_snapshot() {
+    let (app, _state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":10000,"quantity":5}"#,
+    )
+    .await;
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":10100,"quantity":4}"#,
+    )
+    .await;
+    let snapshot = get_json(app.clone(), "/api/engine-snapshot").await;
+
+    request_json(app.clone(), Method::DELETE, "/api/orders", None).await;
+    assert!(
+        get_json(app.clone(), "/api/orders")
+            .await
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let payload = serde_json::to_string(&snapshot).unwrap();
+    let report = request_json(
+        app.clone(),
+        Method::POST,
+        "/api/engine-snapshot",
+        Some(&payload),
+    )
+    .await;
+
+    assert_eq!(report["active_order_count"], 2);
+    assert_eq!(report["snapshot"]["bid_depth"], 5);
+    assert_eq!(report["snapshot"]["ask_depth"], 4);
+    assert_eq!(
+        get_json(app, "/api/orders").await.as_array().unwrap().len(),
+        2
+    );
+}
+
 async fn post_order(app: Router, payload: &'static str) -> serde_json::Value {
     request_json(app, Method::POST, "/api/orders", Some(payload)).await
 }
@@ -191,12 +260,12 @@ async fn request_json(
     app: Router,
     method: Method,
     uri: &str,
-    payload: Option<&'static str>,
+    payload: Option<&str>,
 ) -> serde_json::Value {
     let mut builder = Request::builder().method(method).uri(uri);
     let body = if let Some(payload) = payload {
         builder = builder.header(header::CONTENT_TYPE, "application/json");
-        Body::from(payload)
+        Body::from(payload.to_string())
     } else {
         Body::empty()
     };

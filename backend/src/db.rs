@@ -76,6 +76,13 @@ impl Database {
             Self::Postgres(db) => db.event_count(),
         }
     }
+
+    pub fn events(&mut self) -> Result<Vec<EngineEvent>, DbError> {
+        match self {
+            Self::Sqlite(db) => db.events(),
+            Self::Postgres(db) => db.events(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -204,6 +211,18 @@ impl SqliteDatabase {
             .conn
             .query_row("SELECT COUNT(*) FROM event_journal", [], |row| row.get(0))?)
     }
+
+    fn events(&mut self) -> Result<Vec<EngineEvent>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT payload FROM event_journal ORDER BY id ASC")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let payloads = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        payloads
+            .into_iter()
+            .map(|payload| Ok(serde_json::from_str(&payload)?))
+            .collect()
+    }
 }
 
 pub struct PostgresDatabase {
@@ -314,6 +333,16 @@ impl PostgresDatabase {
             .client()
             .query_one("SELECT COUNT(*) FROM event_journal", &[])?;
         Ok(from_i64(row.get(0)))
+    }
+
+    fn events(&mut self) -> Result<Vec<EngineEvent>, DbError> {
+        let rows = self
+            .client()
+            .query("SELECT payload FROM event_journal ORDER BY id ASC", &[])?;
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<_, Json<EngineEvent>>(0).0)
+            .collect())
     }
 
     fn client(&mut self) -> &mut Client {

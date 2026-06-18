@@ -73,6 +73,9 @@ The server creates the same schema at startup for both backends. SQL copies live
 - `GET /api/orders/:id/history` returns in-memory order lifecycle history.
 - `GET /api/book` returns top-of-book depth.
 - `GET /api/trades` returns recent trades.
+- `GET /api/engine-snapshot` exports a complete in-memory engine snapshot.
+- `POST /api/engine-snapshot` restores the in-memory book from a complete engine snapshot.
+- `POST /api/replay` rebuilds the in-memory book from the durable event journal.
 - `GET /ws` upgrades to a WebSocket stream for book, trade, order, and cancel events.
 
 Prices and quantities are unsigned integers. In a real venue these should represent fixed-point ticks and lots.
@@ -101,7 +104,7 @@ This repo is configured as a Rust-first project:
 - `unsafe_code` is forbidden for this engine.
 - Criterion benchmarks cover add-only, crossing, cancel, and mixed workloads.
 - Phase 3 benchmark coverage also includes snapshot depth and risk rejection workloads.
-- API integration tests cover matching, active orders, cancel, persisted history, and the event journal.
+- API integration tests cover matching, active orders, cancel, persisted history, event journal, and deterministic replay.
 
 Recommended local loop:
 
