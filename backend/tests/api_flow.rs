@@ -13,10 +13,10 @@ use axum::{
 use orderbook_engine::{
     api::{self, AppState},
     db::Database,
-    engine::OrderBook,
+    engine::{EngineWorker, OrderBook},
     model::{OrderHistoryEntry, OrderStatus},
 };
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::broadcast;
 use tower::ServiceExt;
 
 fn test_app() -> (Router, Arc<AppState>) {
@@ -29,7 +29,7 @@ fn test_app() -> (Router, Arc<AppState>) {
     ));
     let (events, _) = broadcast::channel(128);
     let state = Arc::new(AppState {
-        book: Mutex::new(OrderBook::new("BTC-USD")),
+        engine: EngineWorker::start(OrderBook::new("BTC-USD")),
         db: StdMutex::new(Database::open(db_path).unwrap()),
         events,
         kill_switch: AtomicBool::new(false),

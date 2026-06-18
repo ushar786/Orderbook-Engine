@@ -14,11 +14,11 @@ use axum::{
     routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, broadcast};
+use tokio::{sync::broadcast, task::spawn_blocking};
 
 use crate::{
     db::{Database, DbError},
-    engine::{MatchError, OrderBook},
+    engine::{EngineCommand, EngineCommandError, EngineCommandResult, EngineWorker, MatchError},
     model::{
         BookSnapshot, EngineEvent, EngineMetrics, EngineSnapshot, KillSwitchStatus, NewOrder,
         Order, OrderAck, OrderHistoryEntry, OrderId, OrderStatus, ReplaceAck, ReplaceOrder,
@@ -28,7 +28,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct AppState {
-    pub book: Mutex<OrderBook>,
+    pub engine: Arc<EngineWorker>,
     pub db: StdMutex<Database>,
     pub events: broadcast::Sender<EngineEvent>,
     pub kill_switch: AtomicBool,
@@ -66,26 +66,22 @@ pub fn router() -> Router<Arc<AppState>> {
 async fn mass_cancel_orders(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<crate::model::MassCancelAck>, ApiError> {
-    let (cancelled, histories, snapshot) = {
-        let mut book = state.book.lock().await;
-        let cancelled = book.cancel_all();
-        let histories = cancelled
-            .iter()
-            .map(|order| (order.id, book.get_order_history(order.id)))
-            .collect::<Vec<_>>();
-        let snapshot = book.snapshot(25);
-        (cancelled, histories, snapshot)
+    let EngineCommandResult::MassCancel(report) =
+        with_engine(state.clone(), EngineCommand::MassCancel).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
     };
-
-    let events = OrderBook::mass_cancel_events(&cancelled, snapshot);
-    let ack = match events.first() {
+    let ack = match report.events.first() {
         Some(EngineEvent::MassCancel { data }) => data.clone(),
         _ => crate::model::MassCancelAck {
             cancelled_order_ids: Vec::new(),
         },
     };
 
+    let events = report.events.clone();
     let db_events = events.clone();
+    let histories = report.histories;
+    let cancelled = report.cancelled;
     with_db(state.clone(), move |db| {
         for order in &cancelled {
             db.record_cancel(order)?;
@@ -112,21 +108,20 @@ async fn replace_order(
     if state.kill_switch.load(Ordering::Relaxed) {
         return Err(MatchError::KillSwitchActive.into());
     }
-    let (outcome, histories) = {
-        let mut book = state.book.lock().await;
-        let outcome = book.replace(order_id, request)?;
-        let mut histories = touched_histories(&book, &outcome.ack);
-        histories.push((order_id, book.get_order_history(order_id)));
-        (outcome, histories)
+    let EngineCommandResult::Replace(report) =
+        with_engine(state.clone(), EngineCommand::Replace(order_id, request)).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
     };
 
     let replace_ack = ReplaceAck {
         cancelled_order_id: order_id,
-        replacement: outcome.ack.clone(),
+        replacement: report.outcome.ack.clone(),
     };
 
-    let db_ack = outcome.ack.clone();
-    let db_events = outcome.events.clone();
+    let db_ack = report.outcome.ack.clone();
+    let db_events = report.outcome.events.clone();
+    let histories = report.histories;
     with_db(state.clone(), move |db| {
         db.record_ack(&db_ack)?;
         for (history_order_id, history) in &histories {
@@ -136,7 +131,7 @@ async fn replace_order(
     })
     .await?;
 
-    for event in outcome.events {
+    for event in report.outcome.events {
         let _ = state.events.send(event);
     }
 
@@ -157,10 +152,14 @@ async fn health() -> Json<Health> {
 async fn book(
     State(state): State<Arc<AppState>>,
     Query(query): Query<BookQuery>,
-) -> Json<BookSnapshot> {
+) -> Result<Json<BookSnapshot>, ApiError> {
     let depth = query.depth.unwrap_or(25).min(100);
-    let book = state.book.lock().await;
-    Json(book.snapshot(depth))
+    let EngineCommandResult::Snapshot(snapshot) =
+        with_engine(state, EngineCommand::Snapshot { depth }).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
+    };
+    Ok(Json(snapshot))
 }
 
 async fn submit_order(
@@ -170,15 +169,15 @@ async fn submit_order(
     if state.kill_switch.load(Ordering::Relaxed) {
         return Err(MatchError::KillSwitchActive.into());
     }
-    let (outcome, histories) = {
-        let mut book = state.book.lock().await;
-        let outcome = book.submit(request)?;
-        let histories = touched_histories(&book, &outcome.ack);
-        (outcome, histories)
+    let EngineCommandResult::Submit(report) =
+        with_engine(state.clone(), EngineCommand::Submit(request)).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
     };
 
-    let db_ack = outcome.ack.clone();
-    let db_events = outcome.events.clone();
+    let db_ack = report.outcome.ack.clone();
+    let db_events = report.outcome.events.clone();
+    let histories = report.histories;
     with_db(state.clone(), move |db| {
         db.record_ack(&db_ack)?;
         for (order_id, history) in &histories {
@@ -188,47 +187,43 @@ async fn submit_order(
     })
     .await?;
 
-    for event in outcome.events {
+    for event in report.outcome.events {
         let _ = state.events.send(event);
     }
 
-    Ok(Json(outcome.ack))
+    Ok(Json(report.outcome.ack))
 }
 
-async fn active_orders(State(state): State<Arc<AppState>>) -> Json<Vec<OrderWithStatus>> {
-    let book = state.book.lock().await;
-    let orders = book
-        .active_orders()
-        .into_iter()
-        .map(|order| OrderWithStatus {
-            status: latest_status(&book.get_order_history(order.id))
-                .unwrap_or(OrderStatus::Resting),
-            order,
-        })
-        .collect();
-    Json(orders)
+async fn active_orders(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<OrderWithStatus>>, ApiError> {
+    let EngineCommandResult::ActiveOrders(orders) =
+        with_engine(state, EngineCommand::ActiveOrders).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
+    };
+    Ok(Json(
+        orders
+            .into_iter()
+            .map(|(order, status)| OrderWithStatus { order, status })
+            .collect(),
+    ))
 }
 
 async fn cancel_order(
     State(state): State<Arc<AppState>>,
     Path(order_id): Path<OrderId>,
 ) -> Result<StatusCode, ApiError> {
-    let (cancelled, history, snapshot) = {
-        let mut book = state.book.lock().await;
-        let cancelled = book.cancel(order_id)?;
-        let history = book.get_order_history(order_id);
-        let snapshot = book.snapshot(25);
-        (cancelled, history, snapshot)
+    let EngineCommandResult::Cancel(report) =
+        with_engine(state.clone(), EngineCommand::Cancel(order_id)).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
     };
 
-    let events = vec![
-        EngineEvent::Cancel { order_id },
-        EngineEvent::Book {
-            data: snapshot.clone(),
-        },
-    ];
-
-    let db_events = events.clone();
+    let db_events = report.events.clone();
+    let events = report.events;
+    let cancelled = report.cancelled;
+    let history = report.history;
     with_db(state.clone(), move |db| {
         db.record_cancel(&cancelled)?;
         db.record_order_history(order_id, &history)?;
@@ -246,11 +241,12 @@ async fn order_history(
     State(state): State<Arc<AppState>>,
     Path(order_id): Path<OrderId>,
 ) -> Result<Json<Vec<OrderHistoryEntry>>, ApiError> {
-    let book = state.book.lock().await;
-    let memory_history = book.get_order_history(order_id);
-    drop(book);
-    if !memory_history.is_empty() {
-        return Ok(Json(memory_history));
+    match with_engine(state.clone(), EngineCommand::OrderHistory(order_id)).await? {
+        EngineCommandResult::OrderHistory(memory_history) if !memory_history.is_empty() => {
+            return Ok(Json(memory_history));
+        }
+        EngineCommandResult::OrderHistory(_) => {}
+        _ => return Err(ApiError::Internal("unexpected engine response".to_string())),
     }
 
     Ok(Json(
@@ -268,45 +264,39 @@ async fn trades(
     ))
 }
 
-async fn metrics(State(state): State<Arc<AppState>>) -> Json<EngineMetrics> {
-    let book = state.book.lock().await;
-    Json(book.metrics())
+async fn metrics(State(state): State<Arc<AppState>>) -> Result<Json<EngineMetrics>, ApiError> {
+    let EngineCommandResult::Metrics(metrics) = with_engine(state, EngineCommand::Metrics).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
+    };
+    Ok(Json(metrics))
 }
 
 async fn replay_from_journal(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ReplayReport>, ApiError> {
-    let config = {
-        let book = state.book.lock().await;
-        book.config().clone()
-    };
     let checkpoint = with_db(state.clone(), Database::latest_snapshot).await?;
-    let (events, checkpoint_sequence, replayed) = if let Some(checkpoint) = checkpoint {
-        let events = with_db(state.clone(), move |db| {
-            db.events_after_id(checkpoint.event_journal_id)
+    let events = if let Some(checkpoint) = &checkpoint {
+        let event_journal_id = checkpoint.event_journal_id;
+        with_db(state.clone(), move |db| {
+            db.events_after_id(event_journal_id)
         })
-        .await?;
-        let mut replayed = OrderBook::restore_from_snapshot(config, checkpoint.snapshot.clone());
-        replayed.apply_replay_events(events.clone());
-        (events, Some(checkpoint.snapshot.sequence), replayed)
+        .await?
     } else {
-        let events = with_db(state.clone(), Database::events).await?;
-        let replayed = OrderBook::replay(config, events.clone());
-        (events, None, replayed)
+        with_db(state.clone(), Database::events).await?
     };
-    let event_count = events.len();
+    let EngineCommandResult::Replay(report) =
+        with_engine(state.clone(), EngineCommand::Replay { checkpoint, events }).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
+    };
     let report = ReplayReport {
-        event_count,
-        checkpoint_sequence,
-        active_order_count: replayed.active_order_count(),
-        sequence: replayed.engine_seq(),
-        snapshot: replayed.snapshot(25),
+        event_count: report.event_count,
+        checkpoint_sequence: report.checkpoint_sequence,
+        active_order_count: report.active_order_count,
+        sequence: report.sequence,
+        snapshot: report.snapshot,
     };
-
-    {
-        let mut book = state.book.lock().await;
-        *book = replayed;
-    }
     let _ = state.events.send(EngineEvent::Book {
         data: report.snapshot.clone(),
     });
@@ -314,45 +304,47 @@ async fn replay_from_journal(
     Ok(Json(report))
 }
 
-async fn engine_snapshot(State(state): State<Arc<AppState>>) -> Json<EngineSnapshot> {
-    let book = state.book.lock().await;
-    Json(book.capture_snapshot())
+async fn engine_snapshot(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<EngineSnapshot>, ApiError> {
+    let EngineCommandResult::CaptureSnapshot(snapshot) =
+        with_engine(state, EngineCommand::CaptureSnapshot).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
+    };
+    Ok(Json(snapshot))
 }
 
 async fn restore_engine_snapshot(
     State(state): State<Arc<AppState>>,
     Json(snapshot): Json<EngineSnapshot>,
-) -> Json<ReplayReport> {
-    let config = {
-        let book = state.book.lock().await;
-        book.config().clone()
+) -> Result<Json<ReplayReport>, ApiError> {
+    let EngineCommandResult::RestoreSnapshot(report) =
+        with_engine(state.clone(), EngineCommand::RestoreSnapshot(snapshot)).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
     };
-    let restored = OrderBook::restore_from_snapshot(config, snapshot);
     let report = ReplayReport {
-        event_count: 0,
-        checkpoint_sequence: Some(restored.engine_seq()),
-        active_order_count: restored.active_order_count(),
-        sequence: restored.engine_seq(),
-        snapshot: restored.snapshot(25),
+        event_count: report.event_count,
+        checkpoint_sequence: report.checkpoint_sequence,
+        active_order_count: report.active_order_count,
+        sequence: report.sequence,
+        snapshot: report.snapshot,
     };
-
-    {
-        let mut book = state.book.lock().await;
-        *book = restored;
-    }
     let _ = state.events.send(EngineEvent::Book {
         data: report.snapshot.clone(),
     });
 
-    Json(report)
+    Ok(Json(report))
 }
 
 async fn record_snapshot_checkpoint(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<SnapshotCheckpoint>, ApiError> {
-    let snapshot = {
-        let book = state.book.lock().await;
-        book.capture_snapshot()
+    let EngineCommandResult::CaptureSnapshot(snapshot) =
+        with_engine(state.clone(), EngineCommand::CaptureSnapshot).await?
+    else {
+        return Err(ApiError::Internal("unexpected engine response".to_string()));
     };
     let event_journal_id = with_db(state.clone(), Database::latest_event_journal_id).await?;
     let checkpoint = SnapshotCheckpoint {
@@ -402,12 +394,20 @@ where
     .map_err(|err| ApiError::Internal(format!("database task failed: {err:?}")))?
 }
 
+async fn with_engine(
+    state: Arc<AppState>,
+    command: EngineCommand,
+) -> Result<EngineCommandResult, ApiError> {
+    spawn_blocking(move || state.engine.dispatch(command))
+        .await
+        .map_err(|err| ApiError::Internal(format!("engine task failed: {err}")))?
+        .map_err(ApiError::Engine)
+}
+
 async fn stream_events(mut socket: WebSocket, state: Arc<AppState>) {
-    let snapshot = {
-        let book = state.book.lock().await;
-        EngineEvent::Book {
-            data: book.snapshot(25),
-        }
+    let snapshot = match with_engine(state.clone(), EngineCommand::Snapshot { depth: 25 }).await {
+        Ok(EngineCommandResult::Snapshot(snapshot)) => EngineEvent::Book { data: snapshot },
+        _ => return,
     };
     if send_json(&mut socket, &snapshot).await.is_err() {
         return;
@@ -455,27 +455,10 @@ struct OrderWithStatus {
     status: OrderStatus,
 }
 
-fn latest_status(history: &[OrderHistoryEntry]) -> Option<OrderStatus> {
-    history.last().map(|entry| entry.status)
-}
-
-fn touched_histories(book: &OrderBook, ack: &OrderAck) -> Vec<(OrderId, Vec<OrderHistoryEntry>)> {
-    let mut order_ids = Vec::with_capacity(ack.trades.len() + 1);
-    order_ids.push(ack.order.id);
-    for trade in &ack.trades {
-        if !order_ids.contains(&trade.maker_order_id) {
-            order_ids.push(trade.maker_order_id);
-        }
-    }
-    order_ids
-        .into_iter()
-        .map(|order_id| (order_id, book.get_order_history(order_id)))
-        .collect()
-}
-
 #[derive(Debug)]
 pub enum ApiError {
     Match(MatchError),
+    Engine(EngineCommandError),
     Db(DbError),
     Internal(String),
 }
@@ -487,6 +470,16 @@ impl IntoResponse for ApiError {
                 (StatusCode::NOT_FOUND, MatchError::OrderNotFound.to_string())
             }
             ApiError::Match(err) => (StatusCode::BAD_REQUEST, err.to_string()),
+            ApiError::Engine(EngineCommandError::Match(err)) => {
+                (StatusCode::BAD_REQUEST, err.to_string())
+            }
+            ApiError::Engine(err) => {
+                tracing::error!(error = %err, "engine command failure");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "engine failure".to_string(),
+                )
+            }
             ApiError::Db(err) => {
                 tracing::error!(error = %err, debug = ?err, "database failure");
                 (

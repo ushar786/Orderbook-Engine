@@ -4,7 +4,12 @@ use std::{
 };
 
 use axum::Router;
-use orderbook_engine::{api, api::AppState, db::Database, engine::OrderBook};
+use orderbook_engine::{
+    api,
+    api::AppState,
+    db::Database,
+    engine::{EngineWorker, OrderBook},
+};
 use tokio::{net::TcpListener, signal, sync::broadcast};
 use tower_http::{
     cors::CorsLayer,
@@ -33,7 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|_| std::io::Error::other("database startup task failed"))??;
     let (events, _) = broadcast::channel(4096);
     let state = Arc::new(AppState {
-        book: tokio::sync::Mutex::new(OrderBook::new("BTC-USD")),
+        engine: EngineWorker::start(OrderBook::new("BTC-USD")),
         db: StdMutex::new(db),
         events,
         kill_switch: AtomicBool::new(false),

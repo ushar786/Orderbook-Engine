@@ -27,6 +27,7 @@ Phase 3 adds operational depth:
 Phase 4 adds advanced architecture:
 
 - Serialized concurrency command worker.
+- REST/WebSocket transport routed through the serialized engine worker.
 - Dedicated sequencer.
 - Advanced order types such as post-only orders.
 
@@ -70,13 +71,13 @@ backend/src/engine/
 
 - Rust + Axum server.
 - REST routes for health, active orders, submit order, cancel order, order history, book snapshot, recent trades, and engine metrics.
-- Engine command worker serializes concurrent commands onto one hot-path book.
+- Engine command worker serializes concurrent commands and API mutations onto one hot-path book.
 - Replay route rebuilds the in-memory book from the latest persisted checkpoint plus durable event journal.
 - Kill switch route blocks new and replace orders while leaving cancels available.
 - Cancel-replace is modeled as an engine operation: cancel the old resting order, then submit the replacement through the normal matcher.
 - Mass cancel uses the same cancel path for every active order so lifecycle history stays consistent.
 - WebSocket route for book/trade/order/cancel events.
-- Keep API handlers thin: validate transport, call engine, persist audit trail, publish event.
+- Keep API handlers thin: validate transport, dispatch engine commands, persist audit trail, publish event.
 - Later: add auth, rate limits, structured request IDs, metrics, and graceful replay on startup.
 
 ## Database Plan
