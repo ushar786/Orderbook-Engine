@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use std::{
-    sync::{Arc, Mutex as StdMutex},
+    sync::{Arc, Mutex as StdMutex, atomic::AtomicBool},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -32,6 +32,7 @@ fn test_app() -> (Router, Arc<AppState>) {
         book: Mutex::new(OrderBook::new("BTC-USD")),
         db: StdMutex::new(Database::open(db_path).unwrap()),
         events,
+        kill_switch: AtomicBool::new(false),
     });
     let app = Router::new()
         .nest("/api", api::router())
@@ -250,6 +251,84 @@ async fn api_exports_and_restores_engine_snapshot() {
         get_json(app, "/api/orders").await.as_array().unwrap().len(),
         2
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn api_replay_uses_latest_snapshot_checkpoint() {
+    let (app, _state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":10000,"quantity":5}"#,
+    )
+    .await;
+    let checkpoint = request_json(
+        app.clone(),
+        Method::POST,
+        "/api/engine-snapshot/checkpoint",
+        None,
+    )
+    .await;
+    assert_eq!(checkpoint["snapshot"]["sequence"], 1);
+
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":9990,"quantity":2}"#,
+    )
+    .await;
+
+    let report = request_json(app.clone(), Method::POST, "/api/replay", None).await;
+
+    assert_eq!(report["checkpoint_sequence"], 1);
+    assert_eq!(report["event_count"], 3);
+    assert_eq!(report["snapshot"]["bid_depth"], 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn api_kill_switch_blocks_new_orders_but_allows_cancel() {
+    let (app, _state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":10000,"quantity":5}"#,
+    )
+    .await;
+    let status = request_json(
+        app.clone(),
+        Method::POST,
+        "/api/risk/kill-switch",
+        Some(r#"{"enabled":true}"#),
+    )
+    .await;
+    assert_eq!(status["enabled"], true);
+
+    let rejected = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/orders")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"side":"sell","type":"limit","price":10100,"quantity":1}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+
+    let cancel = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/api/orders/1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancel.status(), StatusCode::NO_CONTENT);
 }
 
 async fn post_order(app: Router, payload: &'static str) -> serde_json::Value {

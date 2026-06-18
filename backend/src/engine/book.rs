@@ -283,10 +283,14 @@ impl OrderBook {
 
     pub fn replay(config: BookConfig, events: impl IntoIterator<Item = EngineEvent>) -> Self {
         let mut book = Self::with_config(config);
-        for event in events {
-            book.apply_replay_event(event);
-        }
+        book.apply_replay_events(events);
         book
+    }
+
+    pub fn apply_replay_events(&mut self, events: impl IntoIterator<Item = EngineEvent>) {
+        for event in events {
+            self.apply_replay_event(event);
+        }
     }
 
     pub fn config(&self) -> &BookConfig {

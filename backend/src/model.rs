@@ -124,6 +124,12 @@ pub struct EngineSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotCheckpoint {
+    pub event_journal_id: u64,
+    pub snapshot: EngineSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderHistorySnapshot {
     pub order_id: OrderId,
     pub entries: Vec<OrderHistoryEntry>,
@@ -132,9 +138,15 @@ pub struct OrderHistorySnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplayReport {
     pub event_count: usize,
+    pub checkpoint_sequence: Option<u64>,
     pub active_order_count: usize,
     pub sequence: u64,
     pub snapshot: BookSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KillSwitchStatus {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

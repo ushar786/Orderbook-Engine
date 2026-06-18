@@ -16,3 +16,11 @@ database/migrations/
 ```
 
 The Rust server currently applies equivalent schema creation at startup from `backend/src/db.rs`.
+
+The schema includes:
+
+- `orders`
+- `trades`
+- `order_history`
+- `event_journal`
+- `engine_snapshots`

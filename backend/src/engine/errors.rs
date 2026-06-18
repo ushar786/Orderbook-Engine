@@ -16,6 +16,8 @@ pub enum MatchError {
     MaxOrderNotionalExceeded,
     #[error("open order count exceeds configured risk limit")]
     MaxOpenOrdersExceeded,
+    #[error("kill switch is active")]
+    KillSwitchActive,
     #[error("order not found")]
     OrderNotFound,
 }

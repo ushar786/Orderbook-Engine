@@ -75,7 +75,11 @@ The server creates the same schema at startup for both backends. SQL copies live
 - `GET /api/trades` returns recent trades.
 - `GET /api/engine-snapshot` exports a complete in-memory engine snapshot.
 - `POST /api/engine-snapshot` restores the in-memory book from a complete engine snapshot.
-- `POST /api/replay` rebuilds the in-memory book from the durable event journal.
+- `GET /api/engine-snapshot/checkpoint` returns the latest persisted snapshot checkpoint.
+- `POST /api/engine-snapshot/checkpoint` persists the current engine snapshot as a replay checkpoint.
+- `POST /api/replay` rebuilds the in-memory book from the latest checkpoint plus durable event journal.
+- `GET /api/risk/kill-switch` returns kill switch state.
+- `POST /api/risk/kill-switch` enables/disables kill switch order blocking.
 - `GET /ws` upgrades to a WebSocket stream for book, trade, order, and cancel events.
 
 Prices and quantities are unsigned integers. In a real venue these should represent fixed-point ticks and lots.

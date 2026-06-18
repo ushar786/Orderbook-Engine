@@ -21,8 +21,8 @@ Phase 2 adds the product shell around the engine:
 Phase 3 adds operational depth:
 
 - Broader benchmarks.
-- Enriched snapshots, complete engine snapshot restore, and event-journal replay.
-- Configurable risk checks.
+- Enriched snapshots, complete engine snapshot restore, persisted checkpoints, and event-journal replay.
+- Configurable risk checks and kill switch.
 
 Phase 4 adds advanced architecture:
 
@@ -68,7 +68,8 @@ backend/src/engine/
 
 - Rust + Axum server.
 - REST routes for health, active orders, submit order, cancel order, order history, book snapshot, and recent trades.
-- Replay route rebuilds the in-memory book from the durable event journal.
+- Replay route rebuilds the in-memory book from the latest persisted checkpoint plus durable event journal.
+- Kill switch route blocks new and replace orders while leaving cancels available.
 - Cancel-replace is modeled as an engine operation: cancel the old resting order, then submit the replacement through the normal matcher.
 - Mass cancel uses the same cancel path for every active order so lifecycle history stays consistent.
 - WebSocket route for book/trade/order/cancel events.
@@ -85,7 +86,7 @@ backend/src/engine/
 - `trades` table stores immutable executions by engine sequence.
 - `order_history` stores durable lifecycle entries by order id and engine sequence.
 - `event_journal` stores replay-ready JSON events for order, trade, book, and cancel events.
-- Later: add snapshots table so replay can start from the latest checkpoint instead of the beginning of the journal.
+- `engine_snapshots` stores replay checkpoints with the last covered event journal id.
 
 ## Engine Roadmap
 
@@ -98,4 +99,4 @@ backend/src/engine/
 7. Benchmarks for add-only, crossing, cancel, mixed, snapshot, and risk rejection workloads.
 8. PostgreSQL persistence for Phase 2 completion.
 9. Initial risk controls.
-10. Kill switch, replay checkpoints, and metrics.
+10. Metrics, allocation checks, and deeper risk controls.

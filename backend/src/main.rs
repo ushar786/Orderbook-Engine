@@ -1,4 +1,7 @@
-use std::{env, error::Error, net::SocketAddr, path::PathBuf, sync::Arc, sync::Mutex as StdMutex};
+use std::{
+    env, error::Error, net::SocketAddr, path::PathBuf, sync::Arc, sync::Mutex as StdMutex,
+    sync::atomic::AtomicBool,
+};
 
 use axum::Router;
 use orderbook_engine::{api, api::AppState, db::Database, engine::OrderBook};
@@ -33,6 +36,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         book: tokio::sync::Mutex::new(OrderBook::new("BTC-USD")),
         db: StdMutex::new(db),
         events,
+        kill_switch: AtomicBool::new(false),
     });
 
     let api = api::router();

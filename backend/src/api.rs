@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{
+    Arc, Mutex as StdMutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use axum::{
     Json, Router,
@@ -17,8 +20,9 @@ use crate::{
     db::{Database, DbError},
     engine::{MatchError, OrderBook},
     model::{
-        BookSnapshot, EngineEvent, EngineSnapshot, NewOrder, Order, OrderAck, OrderHistoryEntry,
-        OrderId, OrderStatus, ReplaceAck, ReplaceOrder, ReplayReport, Trade,
+        BookSnapshot, EngineEvent, EngineSnapshot, KillSwitchStatus, NewOrder, Order, OrderAck,
+        OrderHistoryEntry, OrderId, OrderStatus, ReplaceAck, ReplaceOrder, ReplayReport,
+        SnapshotCheckpoint, Trade,
     },
 };
 
@@ -27,6 +31,7 @@ pub struct AppState {
     pub book: Mutex<OrderBook>,
     pub db: StdMutex<Database>,
     pub events: broadcast::Sender<EngineEvent>,
+    pub kill_switch: AtomicBool,
 }
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -46,6 +51,14 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/engine-snapshot",
             get(engine_snapshot).post(restore_engine_snapshot),
+        )
+        .route(
+            "/engine-snapshot/checkpoint",
+            get(latest_snapshot_checkpoint).post(record_snapshot_checkpoint),
+        )
+        .route(
+            "/risk/kill-switch",
+            get(kill_switch_status).post(set_kill_switch),
         )
 }
 
@@ -95,6 +108,9 @@ async fn replace_order(
     Path(order_id): Path<OrderId>,
     Json(request): Json<ReplaceOrder>,
 ) -> Result<Json<ReplaceAck>, ApiError> {
+    if state.kill_switch.load(Ordering::Relaxed) {
+        return Err(MatchError::KillSwitchActive.into());
+    }
     let (outcome, histories) = {
         let mut book = state.book.lock().await;
         let outcome = book.replace(order_id, request)?;
@@ -150,6 +166,9 @@ async fn submit_order(
     State(state): State<Arc<AppState>>,
     Json(request): Json<NewOrder>,
 ) -> Result<Json<OrderAck>, ApiError> {
+    if state.kill_switch.load(Ordering::Relaxed) {
+        return Err(MatchError::KillSwitchActive.into());
+    }
     let (outcome, histories) = {
         let mut book = state.book.lock().await;
         let outcome = book.submit(request)?;
@@ -255,11 +274,24 @@ async fn replay_from_journal(
         let book = state.book.lock().await;
         book.config().clone()
     };
-    let events = with_db(state.clone(), Database::events).await?;
+    let checkpoint = with_db(state.clone(), Database::latest_snapshot).await?;
+    let (events, checkpoint_sequence, replayed) = if let Some(checkpoint) = checkpoint {
+        let events = with_db(state.clone(), move |db| {
+            db.events_after_id(checkpoint.event_journal_id)
+        })
+        .await?;
+        let mut replayed = OrderBook::restore_from_snapshot(config, checkpoint.snapshot.clone());
+        replayed.apply_replay_events(events.clone());
+        (events, Some(checkpoint.snapshot.sequence), replayed)
+    } else {
+        let events = with_db(state.clone(), Database::events).await?;
+        let replayed = OrderBook::replay(config, events.clone());
+        (events, None, replayed)
+    };
     let event_count = events.len();
-    let replayed = OrderBook::replay(config, events);
     let report = ReplayReport {
         event_count,
+        checkpoint_sequence,
         active_order_count: replayed.active_order_count(),
         sequence: replayed.engine_seq(),
         snapshot: replayed.snapshot(25),
@@ -292,6 +324,7 @@ async fn restore_engine_snapshot(
     let restored = OrderBook::restore_from_snapshot(config, snapshot);
     let report = ReplayReport {
         event_count: 0,
+        checkpoint_sequence: Some(restored.engine_seq()),
         active_order_count: restored.active_order_count(),
         sequence: restored.engine_seq(),
         snapshot: restored.snapshot(25),
@@ -306,6 +339,45 @@ async fn restore_engine_snapshot(
     });
 
     Json(report)
+}
+
+async fn record_snapshot_checkpoint(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SnapshotCheckpoint>, ApiError> {
+    let snapshot = {
+        let book = state.book.lock().await;
+        book.capture_snapshot()
+    };
+    let event_journal_id = with_db(state.clone(), Database::latest_event_journal_id).await?;
+    let checkpoint = SnapshotCheckpoint {
+        event_journal_id,
+        snapshot,
+    };
+    let db_checkpoint = checkpoint.clone();
+    with_db(state.clone(), move |db| db.record_snapshot(&db_checkpoint)).await?;
+    Ok(Json(checkpoint))
+}
+
+async fn latest_snapshot_checkpoint(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Option<SnapshotCheckpoint>>, ApiError> {
+    Ok(Json(
+        with_db(state.clone(), Database::latest_snapshot).await?,
+    ))
+}
+
+async fn kill_switch_status(State(state): State<Arc<AppState>>) -> Json<KillSwitchStatus> {
+    Json(KillSwitchStatus {
+        enabled: state.kill_switch.load(Ordering::Relaxed),
+    })
+}
+
+async fn set_kill_switch(
+    State(state): State<Arc<AppState>>,
+    Json(status): Json<KillSwitchStatus>,
+) -> Json<KillSwitchStatus> {
+    state.kill_switch.store(status.enabled, Ordering::Relaxed);
+    Json(status)
 }
 
 async fn with_db<T, F>(state: Arc<AppState>, operation: F) -> Result<T, ApiError>

@@ -39,7 +39,16 @@ CREATE TABLE IF NOT EXISTS event_journal (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS engine_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    engine_sequence BIGINT NOT NULL,
+    event_journal_id BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_trades_sequence ON trades(sequence);
 CREATE INDEX IF NOT EXISTS idx_order_history_order_id ON order_history(order_id);
 CREATE INDEX IF NOT EXISTS idx_event_journal_sequence ON event_journal(engine_sequence);
+CREATE INDEX IF NOT EXISTS idx_engine_snapshots_event_journal_id ON engine_snapshots(event_journal_id);

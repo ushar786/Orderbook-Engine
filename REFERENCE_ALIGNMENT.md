@@ -12,16 +12,16 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
 - Engine sequence numbers, trades, enriched snapshots, and order lifecycle history.
 - Complete engine snapshot restore and deterministic event-journal replay.
-- Configurable risk checks for max quantity, max notional, and max open orders.
-- Durable SQLite/PostgreSQL audit tables for orders, trades, order history, and event journal.
+- Persisted snapshot checkpoints for faster replay startup.
+- Configurable risk checks for max quantity, max notional, max open orders, and kill switch.
+- Durable SQLite/PostgreSQL audit tables for orders, trades, order history, event journal, and engine snapshots.
 - REST, WebSocket, frontend dashboard, integration tests, and Criterion benchmarks.
 
 ## Reference Features Still Missing
 
-- Full risk layer with kill switch, exposure limits, and venue policy hooks.
+- Full risk layer with exposure limits and venue policy hooks.
 - Self-trade prevention.
 - Market order by amount/notional.
-- Snapshot checkpoint persistence for faster replay startup.
 - Wire protocol modules for inbound/outbound messages.
 - Metrics.
 - Allocation budget tests.
@@ -29,7 +29,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 
 ## Next Alignment Order
 
-1. Add snapshot checkpoint persistence for Phase 3.
-2. Add self-trade prevention.
-3. Add kill switch.
-4. Add metrics and allocation-focused benchmarks.
+1. Add self-trade prevention.
+2. Add metrics and allocation-focused benchmarks.
+3. Add exposure limits and venue policy hooks.
+4. Add wire protocol modules.

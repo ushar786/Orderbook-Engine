@@ -6,7 +6,8 @@ use rusqlite::{Connection, params};
 use thiserror::Error;
 
 use crate::model::{
-    EngineEvent, Order, OrderAck, OrderHistoryEntry, OrderId, OrderStatus, Side, TimeInForce, Trade,
+    EngineEvent, EngineSnapshot, Order, OrderAck, OrderHistoryEntry, OrderId, OrderStatus, Side,
+    SnapshotCheckpoint, TimeInForce, Trade,
 };
 
 #[derive(Debug)]
@@ -81,6 +82,34 @@ impl Database {
         match self {
             Self::Sqlite(db) => db.events(),
             Self::Postgres(db) => db.events(),
+        }
+    }
+
+    pub fn events_after_id(&mut self, event_journal_id: u64) -> Result<Vec<EngineEvent>, DbError> {
+        match self {
+            Self::Sqlite(db) => db.events_after_id(event_journal_id),
+            Self::Postgres(db) => db.events_after_id(event_journal_id),
+        }
+    }
+
+    pub fn latest_event_journal_id(&mut self) -> Result<u64, DbError> {
+        match self {
+            Self::Sqlite(db) => db.latest_event_journal_id(),
+            Self::Postgres(db) => db.latest_event_journal_id(),
+        }
+    }
+
+    pub fn record_snapshot(&mut self, checkpoint: &SnapshotCheckpoint) -> Result<(), DbError> {
+        match self {
+            Self::Sqlite(db) => db.record_snapshot(checkpoint),
+            Self::Postgres(db) => db.record_snapshot(checkpoint),
+        }
+    }
+
+    pub fn latest_snapshot(&mut self) -> Result<Option<SnapshotCheckpoint>, DbError> {
+        match self {
+            Self::Sqlite(db) => db.latest_snapshot(),
+            Self::Postgres(db) => db.latest_snapshot(),
         }
     }
 }
@@ -223,6 +252,63 @@ impl SqliteDatabase {
             .map(|payload| Ok(serde_json::from_str(&payload)?))
             .collect()
     }
+
+    fn events_after_id(&mut self, event_journal_id: u64) -> Result<Vec<EngineEvent>, DbError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT payload FROM event_journal WHERE id > ?1 ORDER BY id ASC")?;
+        let rows = stmt.query_map([event_journal_id], |row| row.get::<_, String>(0))?;
+        let payloads = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        payloads
+            .into_iter()
+            .map(|payload| Ok(serde_json::from_str(&payload)?))
+            .collect()
+    }
+
+    fn latest_event_journal_id(&mut self) -> Result<u64, DbError> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(MAX(id), 0) FROM event_journal",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    fn record_snapshot(&mut self, checkpoint: &SnapshotCheckpoint) -> Result<(), DbError> {
+        let payload = serde_json::to_string(&checkpoint.snapshot)?;
+        self.conn.execute(
+            r#"
+            INSERT INTO engine_snapshots (engine_sequence, event_journal_id, payload)
+            VALUES (?1, ?2, ?3)
+            "#,
+            params![
+                checkpoint.snapshot.sequence,
+                checkpoint.event_journal_id,
+                payload,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn latest_snapshot(&mut self) -> Result<Option<SnapshotCheckpoint>, DbError> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT event_journal_id, payload
+            FROM engine_snapshots
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query([])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let event_journal_id = row.get(0)?;
+        let payload: String = row.get(1)?;
+        Ok(Some(SnapshotCheckpoint {
+            event_journal_id,
+            snapshot: serde_json::from_str(&payload)?,
+        }))
+    }
 }
 
 pub struct PostgresDatabase {
@@ -345,6 +431,59 @@ impl PostgresDatabase {
             .collect())
     }
 
+    fn events_after_id(&mut self, event_journal_id: u64) -> Result<Vec<EngineEvent>, DbError> {
+        let rows = self.client().query(
+            "SELECT payload FROM event_journal WHERE id > $1 ORDER BY id ASC",
+            &[&to_i64(event_journal_id)],
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<_, Json<EngineEvent>>(0).0)
+            .collect())
+    }
+
+    fn latest_event_journal_id(&mut self) -> Result<u64, DbError> {
+        let row = self
+            .client()
+            .query_one("SELECT COALESCE(MAX(id), 0) FROM event_journal", &[])?;
+        Ok(from_i64(row.get(0)))
+    }
+
+    fn record_snapshot(&mut self, checkpoint: &SnapshotCheckpoint) -> Result<(), DbError> {
+        let payload = Json(&checkpoint.snapshot);
+        self.client().execute(
+            r#"
+            INSERT INTO engine_snapshots (engine_sequence, event_journal_id, payload)
+            VALUES ($1, $2, $3)
+            "#,
+            &[
+                &to_i64(checkpoint.snapshot.sequence),
+                &to_i64(checkpoint.event_journal_id),
+                &payload,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn latest_snapshot(&mut self) -> Result<Option<SnapshotCheckpoint>, DbError> {
+        let rows = self.client().query(
+            r#"
+            SELECT event_journal_id, payload
+            FROM engine_snapshots
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+            &[],
+        )?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        Ok(Some(SnapshotCheckpoint {
+            event_journal_id: from_i64(row.get(0)),
+            snapshot: row.get::<_, Json<EngineSnapshot>>(1).0,
+        }))
+    }
+
     fn client(&mut self) -> &mut Client {
         match self.client.as_mut() {
             Some(client) => client,
@@ -404,10 +543,19 @@ CREATE TABLE IF NOT EXISTS event_journal (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS engine_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    engine_sequence INTEGER NOT NULL,
+    event_journal_id INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_trades_sequence ON trades(sequence);
 CREATE INDEX IF NOT EXISTS idx_order_history_order_id ON order_history(order_id);
 CREATE INDEX IF NOT EXISTS idx_event_journal_sequence ON event_journal(engine_sequence);
+CREATE INDEX IF NOT EXISTS idx_engine_snapshots_event_journal_id ON engine_snapshots(event_journal_id);
 "#;
 
 const POSTGRES_SCHEMA: &str = r#"
@@ -452,10 +600,19 @@ CREATE TABLE IF NOT EXISTS event_journal (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS engine_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    engine_sequence BIGINT NOT NULL,
+    event_journal_id BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_trades_sequence ON trades(sequence);
 CREATE INDEX IF NOT EXISTS idx_order_history_order_id ON order_history(order_id);
 CREATE INDEX IF NOT EXISTS idx_event_journal_sequence ON event_journal(engine_sequence);
+CREATE INDEX IF NOT EXISTS idx_engine_snapshots_event_journal_id ON engine_snapshots(event_journal_id);
 "#;
 
 fn sqlite_upsert_order(
