@@ -6,3 +6,6 @@ backend/data/
 *.db-shm
 *.db-wal
 .env
+.agents/
+.codex/
+OrderBook-rs/
