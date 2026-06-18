@@ -10,6 +10,12 @@ pub enum MatchError {
     InvalidTick,
     #[error("quantity is outside configured lot size")]
     InvalidLot,
+    #[error("order quantity exceeds configured risk limit")]
+    MaxOrderQuantityExceeded,
+    #[error("order notional exceeds configured risk limit")]
+    MaxOrderNotionalExceeded,
+    #[error("open order count exceeds configured risk limit")]
+    MaxOpenOrdersExceeded,
     #[error("order not found")]
     OrderNotFound,
 }

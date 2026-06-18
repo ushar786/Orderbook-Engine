@@ -33,6 +33,10 @@ impl PriceLevel {
         self.orders.iter()
     }
 
+    pub fn len(&self) -> usize {
+        self.orders.len()
+    }
+
     pub fn snapshot(&self, price: Price) -> Level {
         Level {
             price,
@@ -41,7 +45,7 @@ impl PriceLevel {
         }
     }
 
-    fn depth(&self) -> Quantity {
+    pub fn depth(&self) -> Quantity {
         self.orders
             .iter()
             .map(|order| order.remaining_quantity)

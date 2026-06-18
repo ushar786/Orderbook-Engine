@@ -20,9 +20,9 @@ Phase 2 adds the product shell around the engine:
 
 Phase 3 adds operational depth:
 
-- Benchmarks.
-- Snapshots and snapshot restore.
-- Risk checks.
+- Broader benchmarks.
+- Enriched snapshots and later snapshot restore.
+- Configurable risk checks.
 
 Phase 4 adds advanced architecture:
 
@@ -38,7 +38,7 @@ Phase 4 adds advanced architecture:
 - Time-in-force starts with GTC and IOC, matching the reference repo's order-lifecycle direction.
 - Every accepted order and trade advances an engine sequence.
 - Snapshots are explicit DTOs and are safe to stream over REST/WebSocket.
-- Validation returns typed errors rather than free-form strings.
+- Validation returns typed errors rather than free-form strings, including tick/lot and configurable risk rejects.
 - Benchmarks and unit tests live with the engine.
 
 Current Rust engine modules:
@@ -84,7 +84,7 @@ backend/src/engine/
 - `trades` table stores immutable executions by engine sequence.
 - `order_history` stores durable lifecycle entries by order id and engine sequence.
 - `event_journal` stores replay-ready JSON events for order, trade, book, and cancel events.
-- Later: add snapshots table, PostgreSQL migrations, and a PostgreSQL-backed repository implementation.
+- Later: add snapshots table and replay recovery from the persisted event journal.
 
 ## Engine Roadmap
 
@@ -94,6 +94,7 @@ backend/src/engine/
 4. Snapshot and WebSocket event stream.
 5. Active order reads for the frontend.
 6. Durable lifecycle/event journal persistence.
-7. Benchmarks for add-only, crossing, cancel, and mixed workloads.
+7. Benchmarks for add-only, crossing, cancel, mixed, snapshot, and risk rejection workloads.
 8. PostgreSQL persistence for Phase 2 completion.
-9. Optional risk controls, kill switch, replay journal recovery, and metrics.
+9. Initial risk controls.
+10. Snapshot restore, kill switch, replay journal recovery, and metrics.

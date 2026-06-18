@@ -24,6 +24,14 @@ pub struct BookConfig {
     pub lot_size: Quantity,
     pub max_recent_trades: usize,
     pub default_depth: usize,
+    pub risk: RiskConfig,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RiskConfig {
+    pub max_order_quantity: Option<Quantity>,
+    pub max_order_notional: Option<u64>,
+    pub max_open_orders: Option<usize>,
 }
 
 impl BookConfig {
@@ -34,6 +42,11 @@ impl BookConfig {
             lot_size: 1,
             max_recent_trades: 256,
             default_depth: 25,
+            risk: RiskConfig {
+                max_order_quantity: Some(1_000_000),
+                max_order_notional: Some(10_000_000_000),
+                max_open_orders: Some(100_000),
+            },
         }
     }
 }
@@ -80,9 +93,13 @@ impl OrderBook {
     }
 
     pub fn submit(&mut self, request: NewOrder) -> Result<MatchOutcome, MatchError> {
-        if let Err(err) =
-            reject_reason::validate_order(&request, self.config.tick_size, self.config.lot_size)
-        {
+        if let Err(err) = reject_reason::validate_order(
+            &request,
+            self.config.tick_size,
+            self.config.lot_size,
+            self.active_order_count(),
+            &self.config.risk,
+        ) {
             let order_id = self.allocate_order_id();
             let rejected = Order {
                 id: order_id,
@@ -405,6 +422,52 @@ mod tests {
             book.submit(limit(Side::Buy, 100, 11)).unwrap_err(),
             MatchError::InvalidLot
         );
+    }
+
+    #[test]
+    fn rejects_orders_that_breach_risk_limits() {
+        let mut book = OrderBook::with_config(BookConfig {
+            risk: RiskConfig {
+                max_order_quantity: Some(100),
+                max_order_notional: Some(10_000),
+                max_open_orders: Some(1),
+            },
+            ..BookConfig::btc_usd()
+        });
+
+        assert_eq!(
+            book.submit(limit(Side::Buy, 100, 101)).unwrap_err(),
+            MatchError::MaxOrderQuantityExceeded
+        );
+        assert_eq!(
+            book.submit(limit(Side::Buy, 101, 100)).unwrap_err(),
+            MatchError::MaxOrderNotionalExceeded
+        );
+
+        book.submit(limit(Side::Buy, 99, 10)).unwrap();
+        assert_eq!(
+            book.submit(limit(Side::Sell, 101, 10)).unwrap_err(),
+            MatchError::MaxOpenOrdersExceeded
+        );
+    }
+
+    #[test]
+    fn snapshot_includes_depth_and_spread_metrics() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Buy, 99, 10)).unwrap();
+        book.submit(limit(Side::Buy, 98, 5)).unwrap();
+        book.submit(limit(Side::Sell, 101, 7)).unwrap();
+
+        let snapshot = book.snapshot(5);
+
+        assert_eq!(snapshot.best_bid, Some(99));
+        assert_eq!(snapshot.best_ask, Some(101));
+        assert_eq!(snapshot.spread, Some(2));
+        assert_eq!(snapshot.mid_price, Some(100.0));
+        assert_eq!(snapshot.bid_depth, 15);
+        assert_eq!(snapshot.ask_depth, 7);
+        assert_eq!(snapshot.bid_order_count, 2);
+        assert_eq!(snapshot.ask_order_count, 1);
     }
 
     #[test]

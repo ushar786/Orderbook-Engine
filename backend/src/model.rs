@@ -96,6 +96,12 @@ pub struct BookSnapshot {
     pub sequence: u64,
     pub best_bid: Option<Price>,
     pub best_ask: Option<Price>,
+    pub spread: Option<Price>,
+    pub mid_price: Option<f64>,
+    pub bid_depth: Quantity,
+    pub ask_depth: Quantity,
+    pub bid_order_count: usize,
+    pub ask_order_count: usize,
     pub bids: Vec<Level>,
     pub asks: Vec<Level>,
 }

@@ -4,7 +4,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use orderbook_engine::{
-    engine::OrderBook,
+    engine::{BookConfig, OrderBook, RiskConfig},
     model::{NewOrder, OrderKind, Price, Quantity, Side, TimeInForce},
 };
 
@@ -88,5 +88,45 @@ fn mixed_matching(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, add_only, crossing, cancel, mixed_matching);
+fn snapshot_depth(c: &mut Criterion) {
+    c.bench_function("snapshot_10k_orders_depth_50", |b| {
+        let mut book = OrderBook::new("BTC-USD");
+        for offset in 0..5_000 {
+            book.submit(limit(Side::Buy, 9_999 - offset, 1)).unwrap();
+            book.submit(limit(Side::Sell, 10_001 + offset, 1)).unwrap();
+        }
+
+        b.iter(|| {
+            black_box(book.snapshot(50));
+        });
+    });
+}
+
+fn risk_rejections(c: &mut Criterion) {
+    c.bench_function("risk_reject_1k_orders", |b| {
+        b.iter(|| {
+            let mut book = OrderBook::with_config(BookConfig {
+                risk: RiskConfig {
+                    max_order_quantity: Some(100),
+                    max_order_notional: Some(10_000),
+                    max_open_orders: Some(1_000),
+                },
+                ..BookConfig::btc_usd()
+            });
+            for _ in 0..1_000 {
+                black_box(book.submit(limit(Side::Buy, 100, 101)).unwrap_err());
+            }
+        });
+    });
+}
+
+criterion_group!(
+    benches,
+    add_only,
+    crossing,
+    cancel,
+    mixed_matching,
+    snapshot_depth,
+    risk_rejections
+);
 criterion_main!(benches);

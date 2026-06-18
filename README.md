@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one in-memory orderbook, integer tick/lot validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
+The first version keeps the business surface intentionally simple: one in-memory orderbook, integer tick/lot/risk validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
 
 ## Shape
 
@@ -100,6 +100,7 @@ This repo is configured as a Rust-first project:
   - `cargo b`
 - `unsafe_code` is forbidden for this engine.
 - Criterion benchmarks cover add-only, crossing, cancel, and mixed workloads.
+- Phase 3 benchmark coverage also includes snapshot depth and risk rejection workloads.
 - API integration tests cover matching, active orders, cancel, persisted history, and the event journal.
 
 Recommended local loop:

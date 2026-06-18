@@ -29,6 +29,8 @@ const els = {
   bestBid: document.querySelector("#bestBid"),
   bestAsk: document.querySelector("#bestAsk"),
   spread: document.querySelector("#spread"),
+  bidDepth: document.querySelector("#bidDepth"),
+  askDepth: document.querySelector("#askDepth"),
   midPrice: document.querySelector("#midPrice"),
   sequence: document.querySelector("#sequence"),
   lastOrderId: document.querySelector("#lastOrderId"),
@@ -211,13 +213,22 @@ function connect() {
 function renderBook() {
   if (!state.book) return;
 
-  const { best_bid: bestBid, best_ask: bestAsk } = state.book;
+  const {
+    best_bid: bestBid,
+    best_ask: bestAsk,
+    spread,
+    mid_price: midPrice,
+    bid_depth: bidDepth,
+    ask_depth: askDepth,
+  } = state.book;
   els.symbol.textContent = state.book.symbol;
   els.bestBid.textContent = formatValue(bestBid);
   els.bestAsk.textContent = formatValue(bestAsk);
   els.sequence.textContent = state.book.sequence;
-  els.spread.textContent = bestBid && bestAsk ? formatValue(bestAsk - bestBid) : "-";
-  els.midPrice.textContent = bestBid && bestAsk ? formatDecimal((bestBid + bestAsk) / 2) : "-";
+  els.spread.textContent = formatValue(spread);
+  els.bidDepth.textContent = formatValue(bidDepth);
+  els.askDepth.textContent = formatValue(askDepth);
+  els.midPrice.textContent = midPrice === null || midPrice === undefined ? "-" : formatDecimal(midPrice);
 
   renderLevels(els.asks, [...state.book.asks].reverse(), "ask");
   renderLevels(els.bids, state.book.bids, "bid");

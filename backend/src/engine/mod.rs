@@ -7,5 +7,5 @@ mod reject_reason;
 mod snapshot;
 mod trade;
 
-pub use book::{BookConfig, MatchOutcome, OrderBook};
+pub use book::{BookConfig, MatchOutcome, OrderBook, RiskConfig};
 pub use errors::MatchError;
