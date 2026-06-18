@@ -635,7 +635,7 @@ fn sqlite_upsert_order(
         params![
             order.id,
             side_to_db(order.side),
-            format!("{:?}", order.kind).to_lowercase(),
+            order_kind_to_db(order.kind),
             time_in_force_to_db(order.time_in_force),
             order.price,
             order.original_quantity,
@@ -714,7 +714,7 @@ where
 {
     let price = order.price.map(to_i64);
     let side = side_to_db(order.side).to_string();
-    let order_type = format!("{:?}", order.kind).to_lowercase();
+    let order_type = order_kind_to_db(order.kind).to_string();
     let time_in_force = time_in_force_to_db(order.time_in_force).to_string();
     let status = status_to_db(status).to_string();
     client.execute(
@@ -859,6 +859,14 @@ fn time_in_force_to_db(time_in_force: TimeInForce) -> &'static str {
     match time_in_force {
         TimeInForce::Gtc => "gtc",
         TimeInForce::Ioc => "ioc",
+    }
+}
+
+fn order_kind_to_db(kind: crate::model::OrderKind) -> &'static str {
+    match kind {
+        crate::model::OrderKind::Limit => "limit",
+        crate::model::OrderKind::Market => "market",
+        crate::model::OrderKind::PostOnly => "post_only",
     }
 }
 

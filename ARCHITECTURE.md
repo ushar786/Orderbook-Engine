@@ -26,9 +26,9 @@ Phase 3 adds operational depth:
 
 Phase 4 adds advanced architecture:
 
-- Concurrency.
+- Concurrency command path.
 - Dedicated sequencer.
-- Advanced order types.
+- Advanced order types such as post-only orders.
 
 ## Reference Alignment
 
@@ -36,7 +36,7 @@ Phase 4 adds advanced architecture:
 - Prices and quantities are integer ticks/lots, not floats.
 - Matching is price-time priority: best price first, FIFO inside a price level.
 - Time-in-force starts with GTC and IOC, matching the reference repo's order-lifecycle direction.
-- Every accepted order and trade advances an engine sequence.
+- Every accepted order and trade advances through a dedicated in-memory sequencer.
 - Snapshots are explicit DTOs and are safe to stream over REST/WebSocket.
 - Validation returns typed errors rather than free-form strings, including tick/lot and configurable risk rejects.
 - Benchmarks and unit tests live with the engine.
@@ -50,6 +50,7 @@ backend/src/engine/
   price_level.rs
   order_state.rs
   reject_reason.rs
+  sequencer.rs
   snapshot.rs
   trade.rs
   errors.rs

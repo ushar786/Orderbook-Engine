@@ -11,7 +11,9 @@ impl OrderBook {
             let Some(best_ask) = self.asks.keys().next().copied() else {
                 break;
             };
-            if taker.kind == OrderKind::Limit && taker.price.is_some_and(|limit| best_ask > limit) {
+            if matches!(taker.kind, OrderKind::Limit | OrderKind::PostOnly)
+                && taker.price.is_some_and(|limit| best_ask > limit)
+            {
                 break;
             }
             let Some(trade) = self.fill_at_ask(best_ask, taker) else {
@@ -28,7 +30,9 @@ impl OrderBook {
             let Some(best_bid) = self.bids.keys().next().map(|price| price.0) else {
                 break;
             };
-            if taker.kind == OrderKind::Limit && taker.price.is_some_and(|limit| best_bid < limit) {
+            if matches!(taker.kind, OrderKind::Limit | OrderKind::PostOnly)
+                && taker.price.is_some_and(|limit| best_bid < limit)
+            {
                 break;
             }
             let Some(trade) = self.fill_at_bid(best_bid, taker) else {

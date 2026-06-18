@@ -21,7 +21,7 @@ pub fn validate_order(
     if !request.quantity.is_multiple_of(lot_size) {
         return Err(MatchError::InvalidLot);
     }
-    if request.kind == OrderKind::Limit {
+    if matches!(request.kind, OrderKind::Limit | OrderKind::PostOnly) {
         let price = request
             .price
             .filter(|price| *price > 0)

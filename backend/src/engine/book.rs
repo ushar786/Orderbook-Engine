@@ -8,7 +8,9 @@ use crate::{
         MatchError,
         order_state::{self, OrderHistory},
         price_level::PriceLevel,
-        reject_reason, snapshot, trade,
+        reject_reason,
+        sequencer::InMemorySequencer,
+        snapshot, trade,
     },
     model::{
         BookSnapshot, EngineEvent, EngineMetrics, EngineSnapshot, MassCancelAck, NewOrder, Order,
@@ -62,7 +64,7 @@ pub struct OrderBook {
     pub(super) config: BookConfig,
     pub(super) next_order_id: OrderId,
     pub(super) next_trade_id: u64,
-    pub(super) sequence: u64,
+    pub(super) sequencer: InMemorySequencer,
     pub(super) bids: BTreeMap<Reverse<Price>, PriceLevel>,
     pub(super) asks: BTreeMap<Price, PriceLevel>,
     pub(super) order_index: HashMap<OrderId, (Side, Price)>,
@@ -83,7 +85,7 @@ impl OrderBook {
             config,
             next_order_id: 1,
             next_trade_id: 1,
-            sequence: 0,
+            sequencer: InMemorySequencer::default(),
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
             order_index: HashMap::new(),
@@ -116,7 +118,9 @@ impl OrderBook {
         }
 
         let price = match request.kind {
-            OrderKind::Limit => Some(request.price.ok_or(MatchError::MissingLimitPrice)?),
+            OrderKind::Limit | OrderKind::PostOnly => {
+                Some(request.price.ok_or(MatchError::MissingLimitPrice)?)
+            }
             OrderKind::Market => None,
         };
 
@@ -132,6 +136,22 @@ impl OrderBook {
             created_at_seq: self.next_sequence(),
         };
         self.record_status(&taker, OrderStatus::Accepted);
+
+        if taker.kind == OrderKind::PostOnly && self.would_cross(&taker) {
+            self.record_status(&taker, OrderStatus::Rejected);
+            let ack = OrderAck {
+                order: taker,
+                status: OrderStatus::Rejected,
+                trades: Vec::new(),
+            };
+            let events = vec![
+                EngineEvent::Order { data: ack.clone() },
+                EngineEvent::Book {
+                    data: self.snapshot(self.config.default_depth),
+                },
+            ];
+            return Ok(MatchOutcome { ack, events });
+        }
 
         let trades = match taker.side {
             Side::Buy => self.match_buy(&mut taker),
@@ -233,7 +253,7 @@ impl OrderBook {
     pub fn snapshot(&self, depth: usize) -> BookSnapshot {
         snapshot::build_snapshot(
             &self.config.symbol,
-            self.sequence,
+            self.sequencer.current(),
             &self.bids,
             &self.asks,
             depth,
@@ -253,7 +273,7 @@ impl OrderBook {
 
         EngineSnapshot {
             symbol: self.config.symbol.clone(),
-            sequence: self.sequence,
+            sequence: self.sequencer.current(),
             next_order_id: self.next_order_id,
             next_trade_id: self.next_trade_id,
             active_orders: self.active_orders(),
@@ -265,7 +285,7 @@ impl OrderBook {
     pub fn restore_from_snapshot(mut config: BookConfig, snapshot: EngineSnapshot) -> Self {
         config.symbol = snapshot.symbol;
         let mut book = Self::with_config(config);
-        book.sequence = snapshot.sequence;
+        book.sequencer.advance_to(snapshot.sequence);
         book.next_order_id = snapshot.next_order_id;
         book.next_trade_id = snapshot.next_trade_id;
         book.recent_trades = snapshot.recent_trades.into_iter().collect();
@@ -300,7 +320,7 @@ impl OrderBook {
     pub fn metrics(&self) -> EngineMetrics {
         EngineMetrics {
             symbol: self.config.symbol.clone(),
-            sequence: self.sequence,
+            sequence: self.sequencer.current(),
             active_order_count: self.active_order_count(),
             bid_level_count: self.bids.len(),
             ask_level_count: self.asks.len(),
@@ -315,7 +335,7 @@ impl OrderBook {
     }
 
     pub fn engine_seq(&self) -> u64 {
-        self.sequence
+        self.sequencer.current()
     }
 
     pub fn get_order_history(&self, order_id: OrderId) -> Vec<OrderHistoryEntry> {
@@ -349,6 +369,19 @@ impl OrderBook {
         }
     }
 
+    fn would_cross(&self, order: &Order) -> bool {
+        match order.side {
+            Side::Buy => order
+                .price
+                .zip(self.asks.keys().next().copied())
+                .is_some_and(|(limit, best_ask)| limit >= best_ask),
+            Side::Sell => order
+                .price
+                .zip(self.bids.keys().next().map(|price| price.0))
+                .is_some_and(|(limit, best_bid)| limit <= best_bid),
+        }
+    }
+
     fn apply_replay_event(&mut self, event: EngineEvent) {
         match event {
             EngineEvent::Order { data } => self.replay_order_ack(data),
@@ -365,13 +398,13 @@ impl OrderBook {
                 self.remove_active_order(data.cancelled_order_id);
             }
             EngineEvent::Book { data } => {
-                self.sequence = self.sequence.max(data.sequence);
+                self.sequencer.advance_to(data.sequence);
             }
         }
     }
 
     fn replay_order_ack(&mut self, ack: OrderAck) {
-        self.sequence = self.sequence.max(ack.order.created_at_seq);
+        self.sequencer.advance_to(ack.order.created_at_seq);
         self.next_order_id = self.next_order_id.max(ack.order.id + 1);
         self.record_status(&ack.order, ack.status);
         if matches!(
@@ -384,7 +417,7 @@ impl OrderBook {
     }
 
     fn replay_trade(&mut self, trade: Trade) {
-        self.sequence = self.sequence.max(trade.sequence);
+        self.sequencer.advance_to(trade.sequence);
         self.next_trade_id = self.next_trade_id.max(trade.id + 1);
         self.reduce_active_order(trade.maker_order_id, trade.quantity);
         trade::retain_recent_trades(
@@ -460,12 +493,16 @@ impl OrderBook {
     }
 
     fn next_sequence(&mut self) -> u64 {
-        self.sequence += 1;
-        self.sequence
+        self.sequencer.next_sequence()
     }
 
     fn record_status(&mut self, order: &Order, status: OrderStatus) {
-        order_state::record_status(&mut self.order_history, self.sequence, order, status);
+        order_state::record_status(
+            &mut self.order_history,
+            self.sequencer.current(),
+            order,
+            status,
+        );
     }
 
     pub(super) fn record_maker_fill(
@@ -476,7 +513,7 @@ impl OrderBook {
     ) {
         order_state::record_fill(
             &mut self.order_history,
-            self.sequence,
+            self.sequencer.current(),
             order_id,
             remaining_quantity,
             maker_filled,
@@ -533,6 +570,16 @@ mod tests {
         }
     }
 
+    fn post_only(side: Side, price: Price, quantity: Quantity) -> NewOrder {
+        NewOrder {
+            side,
+            kind: OrderKind::PostOnly,
+            time_in_force: TimeInForce::Gtc,
+            price: Some(price),
+            quantity,
+        }
+    }
+
     #[test]
     fn matches_crossing_limit_orders_fifo() {
         let mut book = OrderBook::new("BTC-USD");
@@ -577,6 +624,35 @@ mod tests {
 
         assert_eq!(outcome.ack.status, OrderStatus::PartiallyFilled);
         assert_eq!(book.snapshot(5).best_ask, None);
+    }
+
+    #[test]
+    fn post_only_rests_when_it_does_not_cross() {
+        let mut book = OrderBook::new("BTC-USD");
+
+        let outcome = book.submit(post_only(Side::Buy, 99, 10)).unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Resting);
+        assert_eq!(outcome.ack.order.kind, OrderKind::PostOnly);
+        assert_eq!(book.snapshot(5).best_bid, Some(99));
+        assert_eq!(book.active_order_count(), 1);
+    }
+
+    #[test]
+    fn post_only_rejects_when_it_would_cross() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Sell, 100, 2)).unwrap();
+
+        let outcome = book.submit(post_only(Side::Buy, 100, 5)).unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Rejected);
+        assert!(outcome.ack.trades.is_empty());
+        assert_eq!(book.snapshot(5).best_ask, Some(100));
+        assert_eq!(book.active_order_count(), 1);
+        assert_eq!(
+            statuses(book.get_order_history(outcome.ack.order.id)),
+            vec![OrderStatus::Accepted, OrderStatus::Rejected]
+        );
     }
 
     #[test]

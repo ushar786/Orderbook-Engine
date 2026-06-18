@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one in-memory orderbook, integer tick/lot/risk validation, limit/market orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
+The first version keeps the business surface intentionally simple: one in-memory orderbook, integer tick/lot/risk validation, limit/market/post-only orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
 
 ## Shape
 
@@ -16,6 +16,7 @@ backend/
       errors.rs        # typed rejects
       reject_reason.rs # validation to typed rejects
       price_level.rs   # FIFO queue per price level
+      sequencer.rs     # monotonic in-memory engine sequence
       snapshot.rs      # book snapshot builder
       trade.rs         # trade creation and retention
     api.rs             # REST + WebSocket transport
@@ -84,6 +85,7 @@ The server creates the same schema at startup for both backends. SQL copies live
 - `GET /ws` upgrades to a WebSocket stream for book, trade, order, and cancel events.
 
 Prices and quantities are unsigned integers. In a real venue these should represent fixed-point ticks and lots.
+Supported order `type` values are `limit`, `market`, and `post_only`.
 
 ## Quality
 

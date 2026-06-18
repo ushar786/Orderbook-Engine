@@ -358,6 +358,32 @@ async fn api_reports_engine_metrics() {
     assert_eq!(metrics["order_history_count"], 2);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn api_accepts_post_only_orders_and_rejects_crossing_post_only() {
+    let (app, _state) = test_app();
+
+    let resting = post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"post_only","price":9900,"quantity":5}"#,
+    )
+    .await;
+    assert_eq!(resting["status"], "resting");
+    assert_eq!(resting["order"]["kind"], "post_only");
+
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":10100,"quantity":2}"#,
+    )
+    .await;
+    let rejected = post_order(
+        app,
+        r#"{"side":"buy","type":"post_only","price":10100,"quantity":1}"#,
+    )
+    .await;
+    assert_eq!(rejected["status"], "rejected");
+    assert!(rejected["trades"].as_array().unwrap().is_empty());
+}
+
 async fn post_order(app: Router, payload: &'static str) -> serde_json::Value {
     request_json(app, Method::POST, "/api/orders", Some(payload)).await
 }

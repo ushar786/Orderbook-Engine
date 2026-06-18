@@ -7,10 +7,10 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Single hot-path Rust engine isolated from API, database, and frontend code.
 - Integer price/quantity ticks and lot validation.
 - Price-time priority matching with FIFO queues inside each price level.
-- Limit and market orders.
+- Limit, market, and post-only orders.
 - GTC and IOC time-in-force.
 - Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
-- Engine sequence numbers, trades, enriched snapshots, and order lifecycle history.
+- Dedicated in-memory sequencer, trades, enriched snapshots, and order lifecycle history.
 - Complete engine snapshot restore and deterministic event-journal replay.
 - Persisted snapshot checkpoints for faster replay startup.
 - Configurable risk checks for max quantity, max notional, max open orders, and kill switch.
@@ -22,13 +22,14 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Full risk layer with exposure limits and venue policy hooks.
 - Self-trade prevention.
 - Market order by amount/notional.
+- Stop/stop-limit and other advanced order types.
 - Wire protocol modules for inbound/outbound messages.
 - Allocation budget tests with a custom allocator.
 - Larger example suite and user guide.
 
 ## Next Alignment Order
 
-1. Start Phase 4 concurrency and sequencer work.
+1. Add concurrent command queue around the engine.
 2. Add self-trade prevention/account-aware policy.
-3. Add advanced order types.
+3. Add more advanced order types.
 4. Add wire protocol modules.
