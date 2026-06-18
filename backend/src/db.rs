@@ -1,6 +1,7 @@
 use std::{fmt, path::Path};
 
 use postgres::{Client, NoTls};
+use postgres_types::Json;
 use rusqlite::{Connection, params};
 use thiserror::Error;
 
@@ -206,7 +207,7 @@ impl SqliteDatabase {
 }
 
 pub struct PostgresDatabase {
-    client: Client,
+    client: Option<Client>,
 }
 
 impl fmt::Debug for PostgresDatabase {
@@ -222,11 +223,13 @@ impl PostgresDatabase {
     fn open(url: &str) -> Result<Self, DbError> {
         let mut client = Client::connect(url, NoTls)?;
         client.batch_execute(POSTGRES_SCHEMA)?;
-        Ok(Self { client })
+        Ok(Self {
+            client: Some(client),
+        })
     }
 
     fn record_ack(&mut self, ack: &OrderAck) -> Result<(), DbError> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = self.client().transaction()?;
         postgres_upsert_order(&mut tx, &ack.order, ack.status)?;
         for trade in &ack.trades {
             postgres_insert_trade(&mut tx, trade)?;
@@ -240,7 +243,7 @@ impl PostgresDatabase {
         order_id: OrderId,
         history: &[OrderHistoryEntry],
     ) -> Result<(), DbError> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = self.client().transaction()?;
         for entry in history {
             postgres_insert_order_history(&mut tx, order_id, entry)?;
         }
@@ -249,7 +252,7 @@ impl PostgresDatabase {
     }
 
     fn record_events(&mut self, events: &[EngineEvent]) -> Result<(), DbError> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = self.client().transaction()?;
         for event in events {
             postgres_insert_event(&mut tx, event)?;
         }
@@ -258,12 +261,12 @@ impl PostgresDatabase {
     }
 
     fn record_cancel(&mut self, order: &Order) -> Result<(), DbError> {
-        postgres_upsert_order(&mut self.client, order, OrderStatus::Cancelled)?;
+        postgres_upsert_order(self.client(), order, OrderStatus::Cancelled)?;
         Ok(())
     }
 
     fn order_history(&mut self, order_id: OrderId) -> Result<Vec<OrderHistoryEntry>, DbError> {
-        let rows = self.client.query(
+        let rows = self.client().query(
             r#"
             SELECT sequence, status, remaining_quantity
             FROM order_history
@@ -283,7 +286,7 @@ impl PostgresDatabase {
     }
 
     fn recent_trades(&mut self, limit: usize) -> Result<Vec<Trade>, DbError> {
-        let rows = self.client.query(
+        let rows = self.client().query(
             r#"
             SELECT id, maker_order_id, taker_order_id, price, quantity, aggressor_side, sequence
             FROM trades
@@ -308,9 +311,25 @@ impl PostgresDatabase {
 
     fn event_count(&mut self) -> Result<u64, DbError> {
         let row = self
-            .client
+            .client()
             .query_one("SELECT COUNT(*) FROM event_journal", &[])?;
         Ok(from_i64(row.get(0)))
+    }
+
+    fn client(&mut self) -> &mut Client {
+        match self.client.as_mut() {
+            Some(client) => client,
+            None => unreachable!("postgres client already closed"),
+        }
+    }
+}
+
+impl Drop for PostgresDatabase {
+    fn drop(&mut self) {
+        let Some(client) = self.client.take() else {
+            return;
+        };
+        let _ = std::thread::spawn(move || drop(client)).join();
     }
 }
 
@@ -508,6 +527,10 @@ where
     C: postgres::GenericClient,
 {
     let price = order.price.map(to_i64);
+    let side = side_to_db(order.side).to_string();
+    let order_type = format!("{:?}", order.kind).to_lowercase();
+    let time_in_force = time_in_force_to_db(order.time_in_force).to_string();
+    let status = status_to_db(status).to_string();
     client.execute(
         r#"
         INSERT INTO orders (
@@ -522,13 +545,13 @@ where
         "#,
         &[
             &to_i64(order.id),
-            &side_to_db(order.side),
-            &format!("{:?}", order.kind).to_lowercase(),
-            &time_in_force_to_db(order.time_in_force),
+            &side,
+            &order_type,
+            &time_in_force,
             &price,
             &to_i64(order.original_quantity),
             &to_i64(order.remaining_quantity),
-            &status_to_db(status),
+            &status,
             &to_i64(order.created_at_seq),
         ],
     )?;
@@ -539,6 +562,7 @@ fn postgres_insert_trade<C>(client: &mut C, trade: &Trade) -> Result<(), postgre
 where
     C: postgres::GenericClient,
 {
+    let aggressor_side = side_to_db(trade.aggressor_side).to_string();
     client.execute(
         r#"
         INSERT INTO trades (
@@ -553,7 +577,7 @@ where
             &to_i64(trade.taker_order_id),
             &to_i64(trade.price),
             &to_i64(trade.quantity),
-            &side_to_db(trade.aggressor_side),
+            &aggressor_side,
             &to_i64(trade.sequence),
         ],
     )?;
@@ -568,6 +592,7 @@ fn postgres_insert_order_history<C>(
 where
     C: postgres::GenericClient,
 {
+    let status = status_to_db(entry.status).to_string();
     client.execute(
         r#"
         INSERT INTO order_history (
@@ -579,7 +604,7 @@ where
         &[
             &to_i64(order_id),
             &to_i64(entry.sequence),
-            &status_to_db(entry.status),
+            &status,
             &to_i64(entry.remaining_quantity),
         ],
     )?;
@@ -590,19 +615,16 @@ fn postgres_insert_event<C>(client: &mut C, event: &EngineEvent) -> Result<(), D
 where
     C: postgres::GenericClient,
 {
-    let payload = serde_json::to_string(event)?;
+    let payload = Json(event);
+    let event_type = event_type(event).to_string();
     client.execute(
         r#"
         INSERT INTO event_journal (
             engine_sequence, event_type, payload
         )
-        VALUES ($1, $2, $3::jsonb)
+        VALUES ($1, $2, $3)
         "#,
-        &[
-            &event_sequence(event).map(to_i64),
-            &event_type(event),
-            &payload,
-        ],
+        &[&event_sequence(event).map(to_i64), &event_type, &payload],
     )?;
     Ok(())
 }

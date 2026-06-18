@@ -20,10 +20,10 @@ backend/
       trade.rs         # trade creation and retention
     api.rs             # REST + WebSocket transport
     db.rs              # SQLite/PostgreSQL audit storage
-  migrations/          # SQL schemas for both persistence backends
     model.rs           # DTOs shared by engine/API/frontend
   benches/             # Criterion benchmarks
   tests/                # API integration tests
+database/              # SQL schemas and persistence notes
 frontend/              # static trading dashboard
 ```
 
@@ -61,7 +61,7 @@ For PostgreSQL persistence, point `ORDERBOOK_DB` at a PostgreSQL URL:
 ORDERBOOK_DB=postgres://orderbook:orderbook@localhost:5432/orderbook
 ```
 
-The server creates the same schema at startup for both backends. SQL copies live in `backend/migrations/`.
+The server creates the same schema at startup for both backends. SQL copies live in `database/migrations/`.
 
 ## API
 

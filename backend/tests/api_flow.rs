@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use std::{
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -30,7 +30,7 @@ fn test_app() -> (Router, Arc<AppState>) {
     let (events, _) = broadcast::channel(128);
     let state = Arc::new(AppState {
         book: Mutex::new(OrderBook::new("BTC-USD")),
-        db: Mutex::new(Database::open(db_path).unwrap()),
+        db: StdMutex::new(Database::open(db_path).unwrap()),
         events,
     });
     let app = Router::new()
@@ -45,7 +45,7 @@ fn postgres_test_url() -> Option<String> {
         .filter(|url| url.starts_with("postgres://") || url.starts_with("postgresql://"))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn api_persists_matching_history_and_events() {
     let (app, state) = test_app();
 
@@ -88,7 +88,7 @@ async fn api_persists_matching_history_and_events() {
     let active_after_cancel = get_json(app, "/api/orders").await;
     assert!(active_after_cancel.as_array().unwrap().is_empty());
 
-    let mut db = state.db.lock().await;
+    let mut db = state.db.lock().unwrap();
     assert_eq!(db.event_count().unwrap(), 7);
     assert_eq!(
         statuses(db.order_history(1).unwrap()),
@@ -108,7 +108,7 @@ async fn api_persists_matching_history_and_events() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn api_replaces_resting_order() {
     let (app, state) = test_app();
 
@@ -136,7 +136,7 @@ async fn api_replaces_resting_order() {
     assert_eq!(active[0]["order"]["price"], 9950);
     assert_eq!(active[0]["order"]["remaining_quantity"], 4);
 
-    let mut db = state.db.lock().await;
+    let mut db = state.db.lock().unwrap();
     assert_eq!(
         statuses(db.order_history(1).unwrap()),
         vec![
@@ -151,7 +151,7 @@ async fn api_replaces_resting_order() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn api_mass_cancels_active_orders() {
     let (app, state) = test_app();
 
@@ -172,7 +172,7 @@ async fn api_mass_cancels_active_orders() {
     let active = get_json(app, "/api/orders").await;
     assert!(active.as_array().unwrap().is_empty());
 
-    let mut db = state.db.lock().await;
+    let mut db = state.db.lock().unwrap();
     assert_eq!(
         db.order_history(1).unwrap().last().unwrap().status,
         OrderStatus::Cancelled

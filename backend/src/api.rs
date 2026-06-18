@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use axum::{
     Json, Router,
@@ -25,7 +25,7 @@ use crate::{
 #[derive(Debug)]
 pub struct AppState {
     pub book: Mutex<OrderBook>,
-    pub db: Mutex<Database>,
+    pub db: StdMutex<Database>,
     pub events: broadcast::Sender<EngineEvent>,
 }
 
@@ -66,16 +66,17 @@ async fn mass_cancel_orders(
         },
     };
 
-    {
-        let mut db = state.db.lock().await;
+    let db_events = events.clone();
+    with_db(state.clone(), move |db| {
         for order in &cancelled {
             db.record_cancel(order)?;
         }
         for (order_id, history) in &histories {
             db.record_order_history(*order_id, history)?;
         }
-        db.record_events(&events)?;
-    }
+        db.record_events(&db_events)
+    })
+    .await?;
 
     for event in events {
         let _ = state.events.send(event);
@@ -102,14 +103,16 @@ async fn replace_order(
         replacement: outcome.ack.clone(),
     };
 
-    {
-        let mut db = state.db.lock().await;
-        db.record_ack(&outcome.ack)?;
+    let db_ack = outcome.ack.clone();
+    let db_events = outcome.events.clone();
+    with_db(state.clone(), move |db| {
+        db.record_ack(&db_ack)?;
         for (history_order_id, history) in &histories {
             db.record_order_history(*history_order_id, history)?;
         }
-        db.record_events(&outcome.events)?;
-    }
+        db.record_events(&db_events)
+    })
+    .await?;
 
     for event in outcome.events {
         let _ = state.events.send(event);
@@ -149,14 +152,16 @@ async fn submit_order(
         (outcome, histories)
     };
 
-    {
-        let mut db = state.db.lock().await;
-        db.record_ack(&outcome.ack)?;
+    let db_ack = outcome.ack.clone();
+    let db_events = outcome.events.clone();
+    with_db(state.clone(), move |db| {
+        db.record_ack(&db_ack)?;
         for (order_id, history) in &histories {
             db.record_order_history(*order_id, history)?;
         }
-        db.record_events(&outcome.events)?;
-    }
+        db.record_events(&db_events)
+    })
+    .await?;
 
     for event in outcome.events {
         let _ = state.events.send(event);
@@ -198,12 +203,13 @@ async fn cancel_order(
         },
     ];
 
-    {
-        let mut db = state.db.lock().await;
+    let db_events = events.clone();
+    with_db(state.clone(), move |db| {
         db.record_cancel(&cancelled)?;
         db.record_order_history(order_id, &history)?;
-        db.record_events(&events)?;
-    }
+        db.record_events(&db_events)
+    })
+    .await?;
 
     for event in events {
         let _ = state.events.send(event);
@@ -222,8 +228,9 @@ async fn order_history(
         return Ok(Json(memory_history));
     }
 
-    let mut db = state.db.lock().await;
-    Ok(Json(db.order_history(order_id)?))
+    Ok(Json(
+        with_db(state.clone(), move |db| db.order_history(order_id)).await?,
+    ))
 }
 
 async fn trades(
@@ -231,8 +238,25 @@ async fn trades(
     Query(query): Query<TradeQuery>,
 ) -> Result<Json<Vec<Trade>>, ApiError> {
     let limit = query.limit.unwrap_or(50).min(200);
-    let mut db = state.db.lock().await;
-    Ok(Json(db.recent_trades(limit)?))
+    Ok(Json(
+        with_db(state.clone(), move |db| db.recent_trades(limit)).await?,
+    ))
+}
+
+async fn with_db<T, F>(state: Arc<AppState>, operation: F) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut Database) -> Result<T, DbError> + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut db = state
+            .db
+            .lock()
+            .map_err(|_| ApiError::Internal("database mutex poisoned".to_string()))?;
+        operation(&mut db).map_err(ApiError::Db)
+    })
+    .join()
+    .map_err(|err| ApiError::Internal(format!("database task failed: {err:?}")))?
 }
 
 async fn stream_events(mut socket: WebSocket, state: Arc<AppState>) {
@@ -310,6 +334,7 @@ fn touched_histories(book: &OrderBook, ack: &OrderAck) -> Vec<(OrderId, Vec<Orde
 pub enum ApiError {
     Match(MatchError),
     Db(DbError),
+    Internal(String),
 }
 
 impl IntoResponse for ApiError {
@@ -320,10 +345,17 @@ impl IntoResponse for ApiError {
             }
             ApiError::Match(err) => (StatusCode::BAD_REQUEST, err.to_string()),
             ApiError::Db(err) => {
-                tracing::error!(error = %err, "database failure");
+                tracing::error!(error = %err, debug = ?err, "database failure");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "database failure".to_string(),
+                )
+            }
+            ApiError::Internal(err) => {
+                tracing::error!(error = %err, "internal api failure");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal failure".to_string(),
                 )
             }
         };

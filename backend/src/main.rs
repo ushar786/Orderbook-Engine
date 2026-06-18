@@ -1,4 +1,4 @@
-use std::{env, error::Error, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{env, error::Error, net::SocketAddr, path::PathBuf, sync::Arc, sync::Mutex as StdMutex};
 
 use axum::Router;
 use orderbook_engine::{api, api::AppState, db::Database, engine::OrderBook};
@@ -25,11 +25,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| "127.0.0.1:8080".to_string())
         .parse()?;
 
-    let db = Database::open(db_path)?;
+    let db = std::thread::spawn(move || Database::open(db_path))
+        .join()
+        .map_err(|_| std::io::Error::other("database startup task failed"))??;
     let (events, _) = broadcast::channel(4096);
     let state = Arc::new(AppState {
         book: tokio::sync::Mutex::new(OrderBook::new("BTC-USD")),
-        db: tokio::sync::Mutex::new(db),
+        db: StdMutex::new(db),
         events,
     });
 

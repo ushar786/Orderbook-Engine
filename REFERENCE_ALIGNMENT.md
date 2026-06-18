@@ -11,7 +11,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - GTC and IOC time-in-force.
 - Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
 - Engine sequence numbers, trades, snapshots, and order lifecycle history.
-- Durable SQLite audit tables for orders, trades, order history, and event journal.
+- Durable SQLite/PostgreSQL audit tables for orders, trades, order history, and event journal.
 - REST, WebSocket, frontend dashboard, integration tests, and Criterion benchmarks.
 
 ## Reference Features Still Missing

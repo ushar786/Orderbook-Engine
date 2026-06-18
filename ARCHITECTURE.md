@@ -78,7 +78,7 @@ backend/src/engine/
 
 - SQLite remains the default local-first audit storage.
 - PostgreSQL is supported alongside SQLite through `ORDERBOOK_DB=postgres://...`.
-- SQL schema copies live in `backend/migrations/sqlite` and `backend/migrations/postgres`.
+- SQL schema copies live in `database/migrations/sqlite` and `database/migrations/postgres`.
 - WAL mode enabled for better concurrent reads.
 - `orders` table stores lifecycle state and remaining quantity.
 - `trades` table stores immutable executions by engine sequence.

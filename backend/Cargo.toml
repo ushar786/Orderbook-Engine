@@ -21,6 +21,7 @@ expect_used = "warn"
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
 postgres = "0.19"
+postgres-types = { version = "0.2", features = ["with-serde_json-1"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
