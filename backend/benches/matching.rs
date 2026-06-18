@@ -120,6 +120,21 @@ fn risk_rejections(c: &mut Criterion) {
     });
 }
 
+fn metrics_and_snapshot_capture(c: &mut Criterion) {
+    c.bench_function("metrics_and_snapshot_capture_10k_orders", |b| {
+        let mut book = OrderBook::new("BTC-USD");
+        for offset in 0..5_000 {
+            book.submit(limit(Side::Buy, 9_999 - offset, 1)).unwrap();
+            book.submit(limit(Side::Sell, 10_001 + offset, 1)).unwrap();
+        }
+
+        b.iter(|| {
+            black_box(book.metrics());
+            black_box(book.capture_snapshot());
+        });
+    });
+}
+
 criterion_group!(
     benches,
     add_only,
@@ -127,6 +142,7 @@ criterion_group!(
     cancel,
     mixed_matching,
     snapshot_depth,
-    risk_rejections
+    risk_rejections,
+    metrics_and_snapshot_capture
 );
 criterion_main!(benches);

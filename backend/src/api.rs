@@ -20,9 +20,9 @@ use crate::{
     db::{Database, DbError},
     engine::{MatchError, OrderBook},
     model::{
-        BookSnapshot, EngineEvent, EngineSnapshot, KillSwitchStatus, NewOrder, Order, OrderAck,
-        OrderHistoryEntry, OrderId, OrderStatus, ReplaceAck, ReplaceOrder, ReplayReport,
-        SnapshotCheckpoint, Trade,
+        BookSnapshot, EngineEvent, EngineMetrics, EngineSnapshot, KillSwitchStatus, NewOrder,
+        Order, OrderAck, OrderHistoryEntry, OrderId, OrderStatus, ReplaceAck, ReplaceOrder,
+        ReplayReport, SnapshotCheckpoint, Trade,
     },
 };
 
@@ -47,6 +47,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/orders/{id}", delete(cancel_order).patch(replace_order))
         .route("/orders/{id}/history", get(order_history))
         .route("/trades", get(trades))
+        .route("/metrics", get(metrics))
         .route("/replay", post(replay_from_journal))
         .route(
             "/engine-snapshot",
@@ -265,6 +266,11 @@ async fn trades(
     Ok(Json(
         with_db(state.clone(), move |db| db.recent_trades(limit)).await?,
     ))
+}
+
+async fn metrics(State(state): State<Arc<AppState>>) -> Json<EngineMetrics> {
+    let book = state.book.lock().await;
+    Json(book.metrics())
 }
 
 async fn replay_from_journal(

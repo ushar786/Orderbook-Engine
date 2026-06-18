@@ -150,6 +150,22 @@ pub struct KillSwitchStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngineMetrics {
+    pub symbol: String,
+    pub sequence: u64,
+    pub active_order_count: usize,
+    pub bid_level_count: usize,
+    pub ask_level_count: usize,
+    pub bid_depth: Quantity,
+    pub ask_depth: Quantity,
+    pub recent_trade_count: usize,
+    pub order_history_count: usize,
+    pub order_history_entry_count: usize,
+    pub next_order_id: OrderId,
+    pub next_trade_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderAck {
     pub order: Order,
     pub status: OrderStatus,

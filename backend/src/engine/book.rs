@@ -11,9 +11,9 @@ use crate::{
         reject_reason, snapshot, trade,
     },
     model::{
-        BookSnapshot, EngineEvent, EngineSnapshot, MassCancelAck, NewOrder, Order, OrderAck,
-        OrderHistoryEntry, OrderHistorySnapshot, OrderId, OrderKind, OrderStatus, Price, Quantity,
-        ReplaceAck, ReplaceOrder, Side, TimeInForce, Trade,
+        BookSnapshot, EngineEvent, EngineMetrics, EngineSnapshot, MassCancelAck, NewOrder, Order,
+        OrderAck, OrderHistoryEntry, OrderHistorySnapshot, OrderId, OrderKind, OrderStatus, Price,
+        Quantity, ReplaceAck, ReplaceOrder, Side, TimeInForce, Trade,
     },
 };
 
@@ -295,6 +295,23 @@ impl OrderBook {
 
     pub fn config(&self) -> &BookConfig {
         &self.config
+    }
+
+    pub fn metrics(&self) -> EngineMetrics {
+        EngineMetrics {
+            symbol: self.config.symbol.clone(),
+            sequence: self.sequence,
+            active_order_count: self.active_order_count(),
+            bid_level_count: self.bids.len(),
+            ask_level_count: self.asks.len(),
+            bid_depth: self.bids.values().map(PriceLevel::depth).sum(),
+            ask_depth: self.asks.values().map(PriceLevel::depth).sum(),
+            recent_trade_count: self.recent_trades.len(),
+            order_history_count: self.order_history.len(),
+            order_history_entry_count: self.order_history.values().map(std::vec::Vec::len).sum(),
+            next_order_id: self.next_order_id,
+            next_trade_id: self.next_trade_id,
+        }
     }
 
     pub fn engine_seq(&self) -> u64 {
@@ -663,6 +680,28 @@ mod tests {
         assert_eq!(snapshot.ask_depth, 7);
         assert_eq!(snapshot.bid_order_count, 2);
         assert_eq!(snapshot.ask_order_count, 1);
+    }
+
+    #[test]
+    fn metrics_report_engine_shape_and_history_size() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Buy, 99, 10)).unwrap();
+        book.submit(limit(Side::Sell, 101, 7)).unwrap();
+
+        let metrics = book.metrics();
+
+        assert_eq!(metrics.symbol, "BTC-USD");
+        assert_eq!(metrics.sequence, 2);
+        assert_eq!(metrics.active_order_count, 2);
+        assert_eq!(metrics.bid_level_count, 1);
+        assert_eq!(metrics.ask_level_count, 1);
+        assert_eq!(metrics.bid_depth, 10);
+        assert_eq!(metrics.ask_depth, 7);
+        assert_eq!(metrics.recent_trade_count, 0);
+        assert_eq!(metrics.order_history_count, 2);
+        assert_eq!(metrics.order_history_entry_count, 4);
+        assert_eq!(metrics.next_order_id, 3);
+        assert_eq!(metrics.next_trade_id, 1);
     }
 
     #[test]

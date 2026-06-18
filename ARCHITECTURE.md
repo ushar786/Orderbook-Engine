@@ -22,7 +22,7 @@ Phase 3 adds operational depth:
 
 - Broader benchmarks.
 - Enriched snapshots, complete engine snapshot restore, persisted checkpoints, and event-journal replay.
-- Configurable risk checks and kill switch.
+- Configurable risk checks, kill switch, and engine metrics.
 
 Phase 4 adds advanced architecture:
 
@@ -67,7 +67,7 @@ backend/src/engine/
 ## Backend Plan
 
 - Rust + Axum server.
-- REST routes for health, active orders, submit order, cancel order, order history, book snapshot, and recent trades.
+- REST routes for health, active orders, submit order, cancel order, order history, book snapshot, recent trades, and engine metrics.
 - Replay route rebuilds the in-memory book from the latest persisted checkpoint plus durable event journal.
 - Kill switch route blocks new and replace orders while leaving cancels available.
 - Cancel-replace is modeled as an engine operation: cancel the old resting order, then submit the replacement through the normal matcher.
@@ -99,4 +99,4 @@ backend/src/engine/
 7. Benchmarks for add-only, crossing, cancel, mixed, snapshot, and risk rejection workloads.
 8. PostgreSQL persistence for Phase 2 completion.
 9. Initial risk controls.
-10. Metrics, allocation checks, and deeper risk controls.
+10. Phase 4: concurrency, sequencer, and advanced order types.

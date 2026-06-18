@@ -15,7 +15,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Persisted snapshot checkpoints for faster replay startup.
 - Configurable risk checks for max quantity, max notional, max open orders, and kill switch.
 - Durable SQLite/PostgreSQL audit tables for orders, trades, order history, event journal, and engine snapshots.
-- REST, WebSocket, frontend dashboard, integration tests, and Criterion benchmarks.
+- REST, WebSocket, frontend dashboard, engine metrics, integration tests, and Criterion benchmarks.
 
 ## Reference Features Still Missing
 
@@ -23,13 +23,12 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Self-trade prevention.
 - Market order by amount/notional.
 - Wire protocol modules for inbound/outbound messages.
-- Metrics.
-- Allocation budget tests.
+- Allocation budget tests with a custom allocator.
 - Larger example suite and user guide.
 
 ## Next Alignment Order
 
-1. Add self-trade prevention.
-2. Add metrics and allocation-focused benchmarks.
-3. Add exposure limits and venue policy hooks.
+1. Start Phase 4 concurrency and sequencer work.
+2. Add self-trade prevention/account-aware policy.
+3. Add advanced order types.
 4. Add wire protocol modules.

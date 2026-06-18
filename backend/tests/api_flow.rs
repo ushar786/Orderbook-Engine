@@ -331,6 +331,33 @@ async fn api_kill_switch_blocks_new_orders_but_allows_cancel() {
     assert_eq!(cancel.status(), StatusCode::NO_CONTENT);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn api_reports_engine_metrics() {
+    let (app, _state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":10000,"quantity":5}"#,
+    )
+    .await;
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":10100,"quantity":4}"#,
+    )
+    .await;
+
+    let metrics = get_json(app, "/api/metrics").await;
+
+    assert_eq!(metrics["symbol"], "BTC-USD");
+    assert_eq!(metrics["sequence"], 2);
+    assert_eq!(metrics["active_order_count"], 2);
+    assert_eq!(metrics["bid_level_count"], 1);
+    assert_eq!(metrics["ask_level_count"], 1);
+    assert_eq!(metrics["bid_depth"], 5);
+    assert_eq!(metrics["ask_depth"], 4);
+    assert_eq!(metrics["order_history_count"], 2);
+}
+
 async fn post_order(app: Router, payload: &'static str) -> serde_json::Value {
     request_json(app, Method::POST, "/api/orders", Some(payload)).await
 }
