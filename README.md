@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one in-memory orderbook, serialized engine command worker, integer tick/lot/risk validation, limit/market/post-only orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
+The first version keeps the business surface intentionally simple: one in-memory orderbook, serialized engine command worker, account-aware self-trade prevention, integer tick/lot/risk validation, limit/market/post-only orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
 
 ## Shape
 
@@ -87,6 +87,8 @@ The server creates the same schema at startup for both backends. SQL copies live
 
 Prices and quantities are unsigned integers. In a real venue these should represent fixed-point ticks and lots.
 Supported order `type` values are `limit`, `market`, and `post_only`.
+Orders accept an optional `account_id`; when omitted, the order is anonymous for backward-compatible local testing.
+The matcher prevents trades between resting and taking orders that carry the same non-empty account id.
 
 ## Quality
 
@@ -112,7 +114,7 @@ This repo is configured as a Rust-first project:
 - `unsafe_code` is forbidden for this engine.
 - Criterion benchmarks cover add-only, crossing, cancel, and mixed workloads.
 - Phase 3 benchmark coverage also includes snapshot depth, risk rejection, metrics, and snapshot capture workloads.
-- API integration tests cover matching, active orders, cancel, persisted history, event journal, deterministic replay, and command-worker transport.
+- API integration tests cover matching, active orders, cancel, persisted history, event journal, deterministic replay, command-worker transport, and account-aware self-trade prevention.
 
 Recommended local loop:
 

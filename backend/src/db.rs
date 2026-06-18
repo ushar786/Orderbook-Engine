@@ -140,19 +140,14 @@ impl SqliteDatabase {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SQLITE_SCHEMA)?;
-        conn.execute_batch(
-            r#"
-            ALTER TABLE orders ADD COLUMN time_in_force TEXT NOT NULL DEFAULT 'gtc';
-            "#,
-        )
-        .or_else(|err| match err {
-            rusqlite::Error::SqliteFailure(_, Some(message))
-                if message.contains("duplicate column name") =>
-            {
-                Ok(())
-            }
-            other => Err(other),
-        })?;
+        sqlite_add_column_if_missing(
+            &conn,
+            "ALTER TABLE orders ADD COLUMN time_in_force TEXT NOT NULL DEFAULT 'gtc'",
+        )?;
+        sqlite_add_column_if_missing(
+            &conn,
+            "ALTER TABLE orders ADD COLUMN account_id TEXT NOT NULL DEFAULT ''",
+        )?;
         Ok(Self { conn })
     }
 
@@ -328,6 +323,12 @@ impl PostgresDatabase {
     fn open(url: &str) -> Result<Self, DbError> {
         let mut client = Client::connect(url, NoTls)?;
         client.batch_execute(POSTGRES_SCHEMA)?;
+        client.batch_execute(
+            r#"
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS time_in_force TEXT NOT NULL DEFAULT 'gtc';
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT '';
+            "#,
+        )?;
         Ok(Self {
             client: Some(client),
         })
@@ -504,6 +505,7 @@ impl Drop for PostgresDatabase {
 const SQLITE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY,
+    account_id TEXT NOT NULL DEFAULT '',
     side TEXT NOT NULL,
     type TEXT NOT NULL,
     time_in_force TEXT NOT NULL DEFAULT 'gtc',
@@ -561,6 +563,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_snapshots_event_journal_id ON engine_snaps
 const POSTGRES_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS orders (
     id BIGINT PRIMARY KEY,
+    account_id TEXT NOT NULL DEFAULT '',
     side TEXT NOT NULL,
     type TEXT NOT NULL,
     time_in_force TEXT NOT NULL DEFAULT 'gtc',
@@ -623,10 +626,11 @@ fn sqlite_upsert_order(
     conn.execute(
         r#"
         INSERT INTO orders (
-            id, side, type, time_in_force, price, original_quantity, remaining_quantity, status, created_at_seq
+            id, account_id, side, type, time_in_force, price, original_quantity, remaining_quantity, status, created_at_seq
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         ON CONFLICT(id) DO UPDATE SET
+            account_id = excluded.account_id,
             time_in_force = excluded.time_in_force,
             remaining_quantity = excluded.remaining_quantity,
             status = excluded.status,
@@ -634,6 +638,7 @@ fn sqlite_upsert_order(
         "#,
         params![
             order.id,
+            order.account_id,
             side_to_db(order.side),
             order_kind_to_db(order.kind),
             time_in_force_to_db(order.time_in_force),
@@ -645,6 +650,17 @@ fn sqlite_upsert_order(
         ],
     )?;
     Ok(())
+}
+
+fn sqlite_add_column_if_missing(conn: &Connection, sql: &str) -> rusqlite::Result<()> {
+    conn.execute_batch(sql).or_else(|err| match err {
+        rusqlite::Error::SqliteFailure(_, Some(message))
+            if message.contains("duplicate column name") =>
+        {
+            Ok(())
+        }
+        other => Err(other),
+    })
 }
 
 fn sqlite_insert_trade(conn: &Connection, trade: &Trade) -> rusqlite::Result<()> {
@@ -720,10 +736,11 @@ where
     client.execute(
         r#"
         INSERT INTO orders (
-            id, side, type, time_in_force, price, original_quantity, remaining_quantity, status, created_at_seq
+            id, account_id, side, type, time_in_force, price, original_quantity, remaining_quantity, status, created_at_seq
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT(id) DO UPDATE SET
+            account_id = EXCLUDED.account_id,
             time_in_force = EXCLUDED.time_in_force,
             remaining_quantity = EXCLUDED.remaining_quantity,
             status = EXCLUDED.status,
@@ -731,6 +748,7 @@ where
         "#,
         &[
             &to_i64(order.id),
+            &order.account_id,
             &side,
             &order_type,
             &time_in_force,

@@ -13,6 +13,7 @@ const els = {
   form: document.querySelector("#orderForm"),
   cancelForm: document.querySelector("#cancelForm"),
   historyForm: document.querySelector("#historyForm"),
+  accountId: document.querySelector("#accountId"),
   type: document.querySelector("#orderType"),
   timeInForce: document.querySelector("#timeInForce"),
   price: document.querySelector("#price"),
@@ -56,6 +57,7 @@ els.form.addEventListener("submit", async (event) => {
   setBusy(true);
 
   const payload = {
+    account_id: els.accountId.value.trim() || "default",
     side: state.side,
     type: els.type.value,
     time_in_force: els.timeInForce.value,
@@ -267,10 +269,12 @@ function renderOrders() {
   }
 
   for (const order of orders) {
+    const accountId = order.account_id || "-";
     const row = document.createElement("div");
     row.className = `order-table order-row ${order.side}`;
     row.innerHTML = `
       <strong>${order.id}</strong>
+      <span title="${escapeHtml(accountId)}">${escapeHtml(accountId)}</span>
       <span>${order.side}</span>
       <span class="status-pill ${order.status}">${formatStatus(order.status)}</span>
       <span>${order.remaining_quantity}</span>
@@ -408,6 +412,14 @@ function formatStatus(status) {
 
 function formatValue(value) {
   return value ?? "-";
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function formatDecimal(value) {

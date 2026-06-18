@@ -384,6 +384,31 @@ async fn api_accepts_post_only_orders_and_rejects_crossing_post_only() {
     assert!(rejected["trades"].as_array().unwrap().is_empty());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn api_prevents_self_trades_by_account_id() {
+    let (app, _state) = test_app();
+
+    let resting = post_order(
+        app.clone(),
+        r#"{"account_id":"acct-a","side":"sell","type":"limit","price":10000,"quantity":2}"#,
+    )
+    .await;
+    assert_eq!(resting["status"], "resting");
+    assert_eq!(resting["order"]["account_id"], "acct-a");
+
+    let rejected = post_order(
+        app.clone(),
+        r#"{"account_id":"acct-a","side":"buy","type":"limit","price":10000,"quantity":2}"#,
+    )
+    .await;
+    assert_eq!(rejected["status"], "rejected");
+    assert!(rejected["trades"].as_array().unwrap().is_empty());
+
+    let active = get_json(app, "/api/orders").await;
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["order"]["id"], resting["order"]["id"]);
+}
+
 async fn post_order(app: Router, payload: &'static str) -> serde_json::Value {
     request_json(app, Method::POST, "/api/orders", Some(payload)).await
 }

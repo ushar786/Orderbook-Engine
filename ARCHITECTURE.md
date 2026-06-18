@@ -29,6 +29,7 @@ Phase 4 adds advanced architecture:
 - Serialized concurrency command worker.
 - REST/WebSocket transport routed through the serialized engine worker.
 - Dedicated sequencer.
+- Account-aware self-trade prevention.
 - Advanced order types such as post-only orders.
 
 ## Reference Alignment
@@ -37,6 +38,7 @@ Phase 4 adds advanced architecture:
 - Prices and quantities are integer ticks/lots, not floats.
 - Matching is price-time priority: best price first, FIFO inside a price level.
 - Time-in-force starts with GTC and IOC, matching the reference repo's order-lifecycle direction.
+- Orders can carry an `account_id`; the matcher blocks self-trades for matching non-empty account ids without allowing crossed resting books.
 - Every accepted order and trade advances through a dedicated in-memory sequencer.
 - Snapshots are explicit DTOs and are safe to stream over REST/WebSocket.
 - Validation returns typed errors rather than free-form strings, including tick/lot and configurable risk rejects.
@@ -75,6 +77,7 @@ backend/src/engine/
 - Replay route rebuilds the in-memory book from the latest persisted checkpoint plus durable event journal.
 - Kill switch route blocks new and replace orders while leaving cancels available.
 - Cancel-replace is modeled as an engine operation: cancel the old resting order, then submit the replacement through the normal matcher.
+- Self-trade prevention skips same-account resting liquidity and prevents crossing remainder from resting.
 - Mass cancel uses the same cancel path for every active order so lifecycle history stays consistent.
 - WebSocket route for book/trade/order/cancel events.
 - Keep API handlers thin: validate transport, dispatch engine commands, persist audit trail, publish event.
@@ -86,7 +89,7 @@ backend/src/engine/
 - PostgreSQL is supported alongside SQLite through `ORDERBOOK_DB=postgres://...`.
 - SQL schema copies live in `database/migrations/sqlite` and `database/migrations/postgres`.
 - WAL mode enabled for better concurrent reads.
-- `orders` table stores lifecycle state and remaining quantity.
+- `orders` table stores account id, lifecycle state, and remaining quantity.
 - `trades` table stores immutable executions by engine sequence.
 - `order_history` stores durable lifecycle entries by order id and engine sequence.
 - `event_journal` stores replay-ready JSON events for order, trade, book, and cancel events.

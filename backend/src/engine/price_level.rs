@@ -12,16 +12,28 @@ impl PriceLevel {
         self.orders.push_back(order);
     }
 
-    pub fn front_mut(&mut self) -> Option<&mut Order> {
-        self.orders.front_mut()
+    pub fn first_matchable_mut(&mut self, account_id: &str) -> Option<&mut Order> {
+        self.orders
+            .iter_mut()
+            .find(|order| account_id.is_empty() || order.account_id != account_id)
+    }
+
+    pub fn has_matchable_order(&self, account_id: &str) -> bool {
+        self.orders
+            .iter()
+            .any(|order| account_id.is_empty() || order.account_id != account_id)
+    }
+
+    pub fn has_order_for_account(&self, account_id: &str) -> bool {
+        !account_id.is_empty()
+            && self
+                .orders
+                .iter()
+                .any(|order| order.account_id == account_id)
     }
 
     pub fn get_mut(&mut self, order_id: OrderId) -> Option<&mut Order> {
         self.orders.iter_mut().find(|order| order.id == order_id)
-    }
-
-    pub fn pop_front(&mut self) -> Option<Order> {
-        self.orders.pop_front()
     }
 
     pub fn remove(&mut self, order_id: OrderId) -> Option<Order> {

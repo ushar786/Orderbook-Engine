@@ -10,6 +10,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Limit, market, and post-only orders.
 - GTC and IOC time-in-force.
 - Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
+- Account-aware self-trade prevention.
 - Dedicated in-memory sequencer, trades, enriched snapshots, and order lifecycle history.
 - Serialized command worker for concurrent producer threads and API transport.
 - Complete engine snapshot restore and deterministic event-journal replay.
@@ -21,7 +22,6 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 ## Reference Features Still Missing
 
 - Full risk layer with exposure limits and venue policy hooks.
-- Self-trade prevention.
 - Market order by amount/notional.
 - Stop/stop-limit and other advanced order types.
 - Wire protocol modules for inbound/outbound messages.
@@ -30,7 +30,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 
 ## Next Alignment Order
 
-1. Add self-trade prevention/account-aware policy.
-2. Add more advanced order types.
-3. Add wire protocol modules.
-4. Add allocation/performance guard tests.
+1. Add more advanced order types.
+2. Add wire protocol modules.
+3. Add allocation/performance guard tests.
+4. Add larger example suite and user guide.

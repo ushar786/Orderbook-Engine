@@ -288,6 +288,7 @@ mod tests {
 
     fn limit(side: Side, price: u64, quantity: u64) -> NewOrder {
         NewOrder {
+            account_id: String::new(),
             side,
             kind: OrderKind::Limit,
             time_in_force: TimeInForce::Gtc,

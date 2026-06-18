@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 pub type OrderId = u64;
 pub type Price = u64;
 pub type Quantity = u64;
+pub type AccountId = String;
+
+pub fn default_account_id() -> AccountId {
+    String::new()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -29,6 +34,8 @@ pub enum TimeInForce {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewOrder {
+    #[serde(default = "default_account_id")]
+    pub account_id: AccountId,
     pub side: Side,
     #[serde(rename = "type")]
     pub kind: OrderKind,
@@ -40,6 +47,8 @@ pub struct NewOrder {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplaceOrder {
+    #[serde(default = "default_account_id")]
+    pub account_id: AccountId,
     pub side: Side,
     #[serde(rename = "type")]
     pub kind: OrderKind,
@@ -52,6 +61,7 @@ pub struct ReplaceOrder {
 impl From<ReplaceOrder> for NewOrder {
     fn from(value: ReplaceOrder) -> Self {
         Self {
+            account_id: value.account_id,
             side: value.side,
             kind: value.kind,
             quantity: value.quantity,
@@ -64,6 +74,8 @@ impl From<ReplaceOrder> for NewOrder {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
     pub id: OrderId,
+    #[serde(default = "default_account_id")]
+    pub account_id: AccountId,
     pub side: Side,
     pub kind: OrderKind,
     pub time_in_force: TimeInForce,

@@ -105,6 +105,7 @@ impl OrderBook {
             let order_id = self.allocate_order_id();
             let rejected = Order {
                 id: order_id,
+                account_id: request.account_id,
                 side: request.side,
                 kind: request.kind,
                 time_in_force: request.time_in_force,
@@ -127,6 +128,7 @@ impl OrderBook {
         let order_id = self.allocate_order_id();
         let mut taker = Order {
             id: order_id,
+            account_id: request.account_id,
             side: request.side,
             kind: request.kind,
             time_in_force: request.time_in_force,
@@ -157,10 +159,17 @@ impl OrderBook {
             Side::Buy => self.match_buy(&mut taker),
             Side::Sell => self.match_sell(&mut taker),
         };
+        let blocked_by_self_trade = taker.remaining_quantity > 0
+            && taker.kind == OrderKind::Limit
+            && taker.time_in_force == TimeInForce::Gtc
+            && self.crosses_own_liquidity(&taker);
 
         let status = if taker.remaining_quantity == 0 {
             OrderStatus::Filled
-        } else if taker.kind == OrderKind::Market || taker.time_in_force == TimeInForce::Ioc {
+        } else if taker.kind == OrderKind::Market
+            || taker.time_in_force == TimeInForce::Ioc
+            || blocked_by_self_trade
+        {
             if trades.is_empty() {
                 OrderStatus::Rejected
             } else {
@@ -386,6 +395,19 @@ impl OrderBook {
         }
     }
 
+    fn crosses_own_liquidity(&self, order: &Order) -> bool {
+        match order.side {
+            Side::Buy => self.asks.iter().any(|(price, level)| {
+                order.price.is_some_and(|limit| *price <= limit)
+                    && level.has_order_for_account(&order.account_id)
+            }),
+            Side::Sell => self.bids.iter().any(|(price, level)| {
+                order.price.is_some_and(|limit| price.0 >= limit)
+                    && level.has_order_for_account(&order.account_id)
+            }),
+        }
+    }
+
     fn apply_replay_event(&mut self, event: EngineEvent) {
         match event {
             EngineEvent::Order { data } => self.replay_order_ack(data),
@@ -565,7 +587,12 @@ mod tests {
     use super::*;
 
     fn limit(side: Side, price: Price, quantity: Quantity) -> NewOrder {
+        limit_for("", side, price, quantity)
+    }
+
+    fn limit_for(account_id: &str, side: Side, price: Price, quantity: Quantity) -> NewOrder {
         NewOrder {
+            account_id: account_id.to_string(),
             side,
             kind: OrderKind::Limit,
             time_in_force: TimeInForce::Gtc,
@@ -576,6 +603,7 @@ mod tests {
 
     fn post_only(side: Side, price: Price, quantity: Quantity) -> NewOrder {
         NewOrder {
+            account_id: String::new(),
             side,
             kind: OrderKind::PostOnly,
             time_in_force: TimeInForce::Gtc,
@@ -599,6 +627,49 @@ mod tests {
     }
 
     #[test]
+    fn prevents_self_trade_and_does_not_rest_crossing_remainder() {
+        let mut book = OrderBook::new("BTC-USD");
+        let maker = book
+            .submit(limit_for("acct-a", Side::Sell, 101, 3))
+            .unwrap()
+            .ack
+            .order;
+
+        let outcome = book.submit(limit_for("acct-a", Side::Buy, 101, 3)).unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Rejected);
+        assert!(outcome.ack.trades.is_empty());
+        assert_eq!(book.active_order_count(), 1);
+        assert_eq!(book.active_orders()[0].id, maker.id);
+        assert_eq!(book.snapshot(5).best_bid, None);
+        assert_eq!(book.snapshot(5).best_ask, Some(101));
+    }
+
+    #[test]
+    fn skips_own_liquidity_and_matches_other_account_at_same_price() {
+        let mut book = OrderBook::new("BTC-USD");
+        let own = book
+            .submit(limit_for("acct-a", Side::Sell, 101, 3))
+            .unwrap()
+            .ack
+            .order;
+        let other = book
+            .submit(limit_for("acct-b", Side::Sell, 101, 4))
+            .unwrap()
+            .ack
+            .order;
+
+        let outcome = book.submit(limit_for("acct-a", Side::Buy, 101, 4)).unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Filled);
+        assert_eq!(outcome.ack.trades.len(), 1);
+        assert_eq!(outcome.ack.trades[0].maker_order_id, other.id);
+        assert_eq!(book.active_order_count(), 1);
+        assert_eq!(book.active_orders()[0].id, own.id);
+        assert_eq!(book.snapshot(5).ask_depth, 3);
+    }
+
+    #[test]
     fn leaves_non_crossing_limit_order_resting() {
         let mut book = OrderBook::new("BTC-USD");
         let outcome = book.submit(limit(Side::Buy, 99, 10)).unwrap();
@@ -618,6 +689,7 @@ mod tests {
 
         let outcome = book
             .submit(NewOrder {
+                account_id: String::new(),
                 side: Side::Buy,
                 kind: OrderKind::Market,
                 time_in_force: TimeInForce::Gtc,
@@ -875,6 +947,7 @@ mod tests {
 
         let outcome = book
             .submit(NewOrder {
+                account_id: String::new(),
                 side: Side::Buy,
                 kind: OrderKind::Limit,
                 time_in_force: TimeInForce::Ioc,
@@ -902,6 +975,7 @@ mod tests {
             .replace(
                 original,
                 ReplaceOrder {
+                    account_id: String::new(),
                     side: Side::Buy,
                     kind: OrderKind::Limit,
                     time_in_force: TimeInForce::Gtc,

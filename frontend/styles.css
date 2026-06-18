@@ -445,7 +445,7 @@ select:focus {
 
 .order-table {
   display: grid;
-  grid-template-columns: 52px 50px 1fr 50px 30px;
+  grid-template-columns: 44px minmax(58px, 0.9fr) 42px minmax(78px, 1fr) 42px 30px;
   gap: 8px;
   align-items: center;
   min-height: 32px;

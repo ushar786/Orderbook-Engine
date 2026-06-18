@@ -10,6 +10,7 @@ use orderbook_engine::{
 
 fn limit(side: Side, price: Price, quantity: Quantity) -> NewOrder {
     NewOrder {
+        account_id: String::new(),
         side,
         kind: OrderKind::Limit,
         time_in_force: TimeInForce::Gtc,
@@ -20,6 +21,7 @@ fn limit(side: Side, price: Price, quantity: Quantity) -> NewOrder {
 
 fn market(side: Side, quantity: Quantity) -> NewOrder {
     NewOrder {
+        account_id: String::new(),
         side,
         kind: OrderKind::Market,
         time_in_force: TimeInForce::Gtc,

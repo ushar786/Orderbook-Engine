@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY,
+    account_id TEXT NOT NULL DEFAULT '',
     side TEXT NOT NULL,
     type TEXT NOT NULL,
     time_in_force TEXT NOT NULL DEFAULT 'gtc',

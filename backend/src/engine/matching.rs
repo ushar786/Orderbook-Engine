@@ -8,14 +8,9 @@ impl OrderBook {
     pub(super) fn match_buy(&mut self, taker: &mut Order) -> Vec<Trade> {
         let mut trades = Vec::new();
         while taker.remaining_quantity > 0 {
-            let Some(best_ask) = self.asks.keys().next().copied() else {
+            let Some(best_ask) = self.best_matchable_ask(taker) else {
                 break;
             };
-            if matches!(taker.kind, OrderKind::Limit | OrderKind::PostOnly)
-                && taker.price.is_some_and(|limit| best_ask > limit)
-            {
-                break;
-            }
             let Some(trade) = self.fill_at_ask(best_ask, taker) else {
                 break;
             };
@@ -27,14 +22,9 @@ impl OrderBook {
     pub(super) fn match_sell(&mut self, taker: &mut Order) -> Vec<Trade> {
         let mut trades = Vec::new();
         while taker.remaining_quantity > 0 {
-            let Some(best_bid) = self.bids.keys().next().map(|price| price.0) else {
+            let Some(best_bid) = self.best_matchable_bid(taker) else {
                 break;
             };
-            if matches!(taker.kind, OrderKind::Limit | OrderKind::PostOnly)
-                && taker.price.is_some_and(|limit| best_bid < limit)
-            {
-                break;
-            }
             let Some(trade) = self.fill_at_bid(best_bid, taker) else {
                 break;
             };
@@ -43,10 +33,37 @@ impl OrderBook {
         trades
     }
 
+    fn best_matchable_ask(&self, taker: &Order) -> Option<Price> {
+        self.asks.iter().find_map(|(price, level)| {
+            if matches!(taker.kind, OrderKind::Limit | OrderKind::PostOnly)
+                && taker.price.is_some_and(|limit| *price > limit)
+            {
+                return None;
+            }
+            level
+                .has_matchable_order(&taker.account_id)
+                .then_some(*price)
+        })
+    }
+
+    fn best_matchable_bid(&self, taker: &Order) -> Option<Price> {
+        self.bids.iter().find_map(|(price, level)| {
+            let price = price.0;
+            if matches!(taker.kind, OrderKind::Limit | OrderKind::PostOnly)
+                && taker.price.is_some_and(|limit| price < limit)
+            {
+                return None;
+            }
+            level
+                .has_matchable_order(&taker.account_id)
+                .then_some(price)
+        })
+    }
+
     fn fill_at_ask(&mut self, price: Price, taker: &mut Order) -> Option<Trade> {
         let (maker_id, trade_quantity, maker_remaining, maker_filled, level_empty) = {
             let level = self.asks.get_mut(&price)?;
-            let maker = level.front_mut()?;
+            let maker = level.first_matchable_mut(&taker.account_id)?;
             let maker_id = maker.id;
             let trade_quantity = maker.remaining_quantity.min(taker.remaining_quantity);
             maker.remaining_quantity -= trade_quantity;
@@ -54,7 +71,7 @@ impl OrderBook {
             let maker_remaining = maker.remaining_quantity;
             let maker_filled = maker.remaining_quantity == 0;
             if maker_filled {
-                level.pop_front();
+                level.remove(maker_id);
             }
             (
                 maker_id,
@@ -78,7 +95,7 @@ impl OrderBook {
     fn fill_at_bid(&mut self, price: Price, taker: &mut Order) -> Option<Trade> {
         let (maker_id, trade_quantity, maker_remaining, maker_filled, level_empty) = {
             let level = self.bids.get_mut(&Reverse(price))?;
-            let maker = level.front_mut()?;
+            let maker = level.first_matchable_mut(&taker.account_id)?;
             let maker_id = maker.id;
             let trade_quantity = maker.remaining_quantity.min(taker.remaining_quantity);
             maker.remaining_quantity -= trade_quantity;
@@ -86,7 +103,7 @@ impl OrderBook {
             let maker_remaining = maker.remaining_quantity;
             let maker_filled = maker.remaining_quantity == 0;
             if maker_filled {
-                level.pop_front();
+                level.remove(maker_id);
             }
             (
                 maker_id,
