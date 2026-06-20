@@ -21,6 +21,7 @@ pub enum Side {
 pub enum OrderKind {
     Limit,
     Market,
+    MarketByNotional,
     PostOnly,
 }
 
@@ -39,7 +40,10 @@ pub struct NewOrder {
     pub side: Side,
     #[serde(rename = "type")]
     pub kind: OrderKind,
+    #[serde(default)]
     pub quantity: Quantity,
+    #[serde(default)]
+    pub quote_quantity: Option<Quantity>,
     pub price: Option<Price>,
     #[serde(default)]
     pub time_in_force: TimeInForce,
@@ -52,7 +56,10 @@ pub struct ReplaceOrder {
     pub side: Side,
     #[serde(rename = "type")]
     pub kind: OrderKind,
+    #[serde(default)]
     pub quantity: Quantity,
+    #[serde(default)]
+    pub quote_quantity: Option<Quantity>,
     pub price: Option<Price>,
     #[serde(default)]
     pub time_in_force: TimeInForce,
@@ -65,6 +72,7 @@ impl From<ReplaceOrder> for NewOrder {
             side: value.side,
             kind: value.kind,
             quantity: value.quantity,
+            quote_quantity: value.quote_quantity,
             price: value.price,
             time_in_force: value.time_in_force,
         }
@@ -82,6 +90,10 @@ pub struct Order {
     pub price: Option<Price>,
     pub original_quantity: Quantity,
     pub remaining_quantity: Quantity,
+    #[serde(default)]
+    pub original_quote_quantity: Option<Quantity>,
+    #[serde(default)]
+    pub remaining_quote_quantity: Option<Quantity>,
     pub created_at_seq: u64,
 }
 

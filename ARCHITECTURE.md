@@ -30,13 +30,14 @@ Phase 4 adds advanced architecture:
 - REST/WebSocket transport routed through the serialized engine worker.
 - Dedicated sequencer.
 - Account-aware self-trade prevention.
-- Advanced order types such as post-only orders.
+- Advanced order types such as post-only and market-by-notional buy orders.
 
 ## Reference Alignment
 
 - `src/engine/` is the hot path. API, database, and frontend code do not own matching rules.
 - Prices and quantities are integer ticks/lots, not floats.
 - Matching is price-time priority: best price first, FIFO inside a price level.
+- Market-by-notional orders consume ask liquidity using a quote budget instead of base quantity.
 - Time-in-force starts with GTC and IOC, matching the reference repo's order-lifecycle direction.
 - Orders can carry an `account_id`; the matcher blocks self-trades for matching non-empty account ids without allowing crossed resting books.
 - Every accepted order and trade advances through a dedicated in-memory sequencer.
@@ -89,7 +90,7 @@ backend/src/engine/
 - PostgreSQL is supported alongside SQLite through `ORDERBOOK_DB=postgres://...`.
 - SQL schema copies live in `database/migrations/sqlite` and `database/migrations/postgres`.
 - WAL mode enabled for better concurrent reads.
-- `orders` table stores account id, lifecycle state, and remaining quantity.
+- `orders` table stores account id, lifecycle state, base quantity, and optional quote quantity.
 - `trades` table stores immutable executions by engine sequence.
 - `order_history` stores durable lifecycle entries by order id and engine sequence.
 - `event_journal` stores replay-ready JSON events for order, trade, book, and cancel events.

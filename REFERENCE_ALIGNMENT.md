@@ -7,7 +7,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Single hot-path Rust engine isolated from API, database, and frontend code.
 - Integer price/quantity ticks and lot validation.
 - Price-time priority matching with FIFO queues inside each price level.
-- Limit, market, and post-only orders.
+- Limit, market, market-by-notional, and post-only orders.
 - GTC and IOC time-in-force.
 - Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
 - Account-aware self-trade prevention.
@@ -22,7 +22,6 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 ## Reference Features Still Missing
 
 - Full risk layer with exposure limits and venue policy hooks.
-- Market order by amount/notional.
 - Stop/stop-limit and other advanced order types.
 - Wire protocol modules for inbound/outbound messages.
 - Allocation budget tests with a custom allocator.

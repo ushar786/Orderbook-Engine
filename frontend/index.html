@@ -69,6 +69,7 @@
               <select id="orderType">
                 <option value="limit">Limit</option>
                 <option value="market">Market</option>
+                <option value="market_by_notional">Market By Notional</option>
                 <option value="post_only">Post Only</option>
               </select>
             </label>
@@ -89,6 +90,11 @@
             <label>
               <span>Quantity</span>
               <input id="quantity" type="number" min="1" step="1" value="10" />
+            </label>
+
+            <label id="quoteField" hidden>
+              <span>Quote Budget</span>
+              <input id="quoteQuantity" type="number" min="1" step="1" value="100000" />
             </label>
 
             <button class="submit" id="submitOrder" type="submit">Submit</button>

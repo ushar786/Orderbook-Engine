@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS orders (
     price INTEGER,
     original_quantity INTEGER NOT NULL,
     remaining_quantity INTEGER NOT NULL,
+    original_quote_quantity INTEGER,
+    remaining_quote_quantity INTEGER,
     status TEXT NOT NULL,
     created_at_seq INTEGER NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

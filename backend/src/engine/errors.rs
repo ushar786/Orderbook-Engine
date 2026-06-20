@@ -4,6 +4,10 @@ use thiserror::Error;
 pub enum MatchError {
     #[error("quantity must be greater than zero")]
     InvalidQuantity,
+    #[error("quote quantity must be greater than zero")]
+    InvalidQuoteQuantity,
+    #[error("order side is not supported for this order type")]
+    UnsupportedSide,
     #[error("limit orders require a price greater than zero")]
     MissingLimitPrice,
     #[error("price is outside configured tick size")]

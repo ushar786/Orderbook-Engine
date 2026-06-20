@@ -385,6 +385,36 @@ async fn api_accepts_post_only_orders_and_rejects_crossing_post_only() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn api_accepts_market_by_notional_buy_orders() {
+    let (app, _state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":10000,"quantity":3}"#,
+    )
+    .await;
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":10100,"quantity":2}"#,
+    )
+    .await;
+
+    let ack = post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"market_by_notional","quote_quantity":40100}"#,
+    )
+    .await;
+
+    assert_eq!(ack["status"], "filled");
+    assert_eq!(ack["order"]["original_quote_quantity"], 40100);
+    assert_eq!(ack["order"]["remaining_quote_quantity"], 0);
+    assert_eq!(ack["trades"].as_array().unwrap().len(), 2);
+
+    let book = get_json(app, "/api/book").await;
+    assert_eq!(book["ask_depth"], 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_prevents_self_trades_by_account_id() {
     let (app, _state) = test_app();
 

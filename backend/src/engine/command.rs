@@ -294,6 +294,7 @@ mod tests {
             time_in_force: TimeInForce::Gtc,
             price: Some(price),
             quantity,
+            quote_quantity: None,
         }
     }
 

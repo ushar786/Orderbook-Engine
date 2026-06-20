@@ -19,6 +19,8 @@ const els = {
   price: document.querySelector("#price"),
   quantity: document.querySelector("#quantity"),
   priceField: document.querySelector("#priceField"),
+  quoteField: document.querySelector("#quoteField"),
+  quoteQuantity: document.querySelector("#quoteQuantity"),
   cancelOrderId: document.querySelector("#cancelOrderId"),
   historyOrderId: document.querySelector("#historyOrderId"),
   message: document.querySelector("#message"),
@@ -49,7 +51,7 @@ document.querySelectorAll("[data-side]").forEach((button) => {
 });
 
 els.type.addEventListener("change", () => {
-  els.priceField.hidden = els.type.value === "market";
+  syncTicketFields();
 });
 
 els.form.addEventListener("submit", async (event) => {
@@ -61,15 +63,23 @@ els.form.addEventListener("submit", async (event) => {
     side: state.side,
     type: els.type.value,
     time_in_force: els.timeInForce.value,
-    quantity: readPositiveInteger(els.quantity.value),
   };
 
-  if (!payload.quantity) {
-    setBusy(false);
-    return setMessage("quantity must be a positive integer", true);
+  if (payload.type === "market_by_notional") {
+    payload.quote_quantity = readPositiveInteger(els.quoteQuantity.value);
+    if (!payload.quote_quantity) {
+      setBusy(false);
+      return setMessage("quote budget must be a positive integer", true);
+    }
+  } else {
+    payload.quantity = readPositiveInteger(els.quantity.value);
+    if (!payload.quantity) {
+      setBusy(false);
+      return setMessage("quantity must be a positive integer", true);
+    }
   }
 
-  if (payload.type === "limit") {
+  if (payload.type === "limit" || payload.type === "post_only") {
     payload.price = readPositiveInteger(els.price.value);
     if (!payload.price) {
       setBusy(false);
@@ -435,11 +445,19 @@ function setBusy(isBusy) {
   document.querySelector("#submitOrder").disabled = isBusy;
 }
 
+function syncTicketFields() {
+  const isMarketByNotional = els.type.value === "market_by_notional";
+  els.priceField.hidden = els.type.value === "market" || isMarketByNotional;
+  els.quantity.closest("label").hidden = isMarketByNotional;
+  els.quoteField.hidden = !isMarketByNotional;
+}
+
 function touchUpdated() {
   els.lastUpdate.textContent = `last update ${new Date().toLocaleTimeString()}`;
 }
 
 try {
+  syncTicketFields();
   await Promise.all([loadBook(), loadTrades(), loadOrders()]);
   connect();
 } catch (error) {

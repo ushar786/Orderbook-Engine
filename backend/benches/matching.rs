@@ -16,6 +16,7 @@ fn limit(side: Side, price: Price, quantity: Quantity) -> NewOrder {
         time_in_force: TimeInForce::Gtc,
         price: Some(price),
         quantity,
+        quote_quantity: None,
     }
 }
 
@@ -27,6 +28,7 @@ fn market(side: Side, quantity: Quantity) -> NewOrder {
         time_in_force: TimeInForce::Gtc,
         price: None,
         quantity,
+        quote_quantity: None,
     }
 }
 

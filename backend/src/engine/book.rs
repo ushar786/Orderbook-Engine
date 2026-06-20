@@ -112,6 +112,8 @@ impl OrderBook {
                 price: request.price,
                 original_quantity: request.quantity,
                 remaining_quantity: request.quantity,
+                original_quote_quantity: request.quote_quantity,
+                remaining_quote_quantity: request.quote_quantity,
                 created_at_seq: self.next_sequence(),
             };
             self.record_status(&rejected, OrderStatus::Rejected);
@@ -122,7 +124,7 @@ impl OrderBook {
             OrderKind::Limit | OrderKind::PostOnly => {
                 Some(request.price.ok_or(MatchError::MissingLimitPrice)?)
             }
-            OrderKind::Market => None,
+            OrderKind::Market | OrderKind::MarketByNotional => None,
         };
 
         let order_id = self.allocate_order_id();
@@ -135,6 +137,8 @@ impl OrderBook {
             price,
             original_quantity: request.quantity,
             remaining_quantity: request.quantity,
+            original_quote_quantity: request.quote_quantity,
+            remaining_quote_quantity: request.quote_quantity,
             created_at_seq: self.next_sequence(),
         };
         self.record_status(&taker, OrderStatus::Accepted);
@@ -164,9 +168,10 @@ impl OrderBook {
             && taker.time_in_force == TimeInForce::Gtc
             && self.crosses_own_liquidity(&taker);
 
-        let status = if taker.remaining_quantity == 0 {
+        let status = if taker_is_filled(&taker) {
             OrderStatus::Filled
         } else if taker.kind == OrderKind::Market
+            || taker.kind == OrderKind::MarketByNotional
             || taker.time_in_force == TimeInForce::Ioc
             || blocked_by_self_trade
         {
@@ -581,6 +586,13 @@ fn reduce_level_order<K: Ord>(
     (remaining_quantity, filled, level.is_empty())
 }
 
+fn taker_is_filled(taker: &Order) -> bool {
+    match taker.kind {
+        OrderKind::MarketByNotional => taker.remaining_quote_quantity == Some(0),
+        _ => taker.remaining_quantity == 0,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -598,6 +610,7 @@ mod tests {
             time_in_force: TimeInForce::Gtc,
             price: Some(price),
             quantity,
+            quote_quantity: None,
         }
     }
 
@@ -609,6 +622,19 @@ mod tests {
             time_in_force: TimeInForce::Gtc,
             price: Some(price),
             quantity,
+            quote_quantity: None,
+        }
+    }
+
+    fn market_by_notional(side: Side, quote_quantity: Quantity) -> NewOrder {
+        NewOrder {
+            account_id: String::new(),
+            side,
+            kind: OrderKind::MarketByNotional,
+            time_in_force: TimeInForce::Gtc,
+            price: None,
+            quantity: 0,
+            quote_quantity: Some(quote_quantity),
         }
     }
 
@@ -695,11 +721,40 @@ mod tests {
                 time_in_force: TimeInForce::Gtc,
                 price: None,
                 quantity: 5,
+                quote_quantity: None,
             })
             .unwrap();
 
         assert_eq!(outcome.ack.status, OrderStatus::PartiallyFilled);
         assert_eq!(book.snapshot(5).best_ask, None);
+    }
+
+    #[test]
+    fn market_by_notional_buys_with_quote_budget() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Sell, 100, 3)).unwrap();
+        book.submit(limit(Side::Sell, 110, 3)).unwrap();
+
+        let outcome = book.submit(market_by_notional(Side::Buy, 410)).unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Filled);
+        assert_eq!(outcome.ack.order.original_quote_quantity, Some(410));
+        assert_eq!(outcome.ack.order.remaining_quote_quantity, Some(0));
+        assert_eq!(outcome.ack.trades.len(), 2);
+        assert_eq!(outcome.ack.trades[0].quantity, 3);
+        assert_eq!(outcome.ack.trades[1].quantity, 1);
+        assert_eq!(book.snapshot(5).ask_depth, 2);
+    }
+
+    #[test]
+    fn market_by_notional_rejects_unsupported_sell_side() {
+        let mut book = OrderBook::new("BTC-USD");
+
+        let err = book
+            .submit(market_by_notional(Side::Sell, 100))
+            .unwrap_err();
+
+        assert_eq!(err, MatchError::UnsupportedSide);
     }
 
     #[test]
@@ -953,6 +1008,7 @@ mod tests {
                 time_in_force: TimeInForce::Ioc,
                 price: Some(100),
                 quantity: 5,
+                quote_quantity: None,
             })
             .unwrap();
 
@@ -981,6 +1037,7 @@ mod tests {
                     time_in_force: TimeInForce::Gtc,
                     price: Some(100),
                     quantity: 4,
+                    quote_quantity: None,
                 },
             )
             .unwrap();

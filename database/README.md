@@ -19,7 +19,7 @@ The Rust server currently applies equivalent schema creation at startup from `ba
 
 The schema includes:
 
-- `orders`, including `account_id` for self-trade prevention/audit
+- `orders`, including `account_id` and optional quote quantity for self-trade prevention/audit
 - `trades`
 - `order_history`
 - `event_journal`
