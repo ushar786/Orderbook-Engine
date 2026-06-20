@@ -65,6 +65,27 @@ ORDERBOOK_DB=postgres://orderbook:orderbook@localhost:5432/orderbook
 
 The server creates the same schema at startup for both backends. SQL copies live in `database/migrations/`.
 
+## CLI
+
+Start the backend, then use the CLI from another terminal:
+
+```sh
+cd backend
+cargo run --release --bin orderbook-engine
+cargo run --bin orderbook-cli -- health
+cargo run --bin orderbook-cli -- submit --side buy --type limit --quantity 10 --price 10000
+cargo run --bin orderbook-cli -- book --depth 10
+cargo run --bin orderbook-cli -- orders
+cargo run --bin orderbook-cli -- cancel 1
+```
+
+The CLI uses `ORDERBOOK_API` or `--url`:
+
+```sh
+ORDERBOOK_API=http://127.0.0.1:8080 cargo run --bin orderbook-cli -- metrics
+cargo run --bin orderbook-cli -- --url http://127.0.0.1:8080 trades --limit 20
+```
+
 ## API
 
 - `POST /api/orders` submits an order.
