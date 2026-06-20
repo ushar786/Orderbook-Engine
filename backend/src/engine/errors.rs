@@ -22,6 +22,12 @@ pub enum MatchError {
     MaxOrderNotionalExceeded,
     #[error("open order count exceeds configured risk limit")]
     MaxOpenOrdersExceeded,
+    #[error("open order count exceeds configured account risk limit")]
+    MaxAccountOpenOrdersExceeded,
+    #[error("account is blocked by risk policy")]
+    AccountBlocked,
+    #[error("fill-or-kill order cannot be fully filled immediately")]
+    FillOrKillRejected,
     #[error("kill switch is active")]
     KillSwitchActive,
     #[error("order not found")]

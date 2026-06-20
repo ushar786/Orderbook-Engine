@@ -24,6 +24,7 @@ use crate::{
         Order, OrderAck, OrderHistoryEntry, OrderId, OrderStatus, ReplaceAck, ReplaceOrder,
         ReplayReport, SnapshotCheckpoint, Trade,
     },
+    protocol::OutboundMessage,
 };
 
 #[derive(Debug)]
@@ -422,7 +423,8 @@ async fn stream_events(mut socket: WebSocket, state: Arc<AppState>) {
 }
 
 async fn send_json(socket: &mut WebSocket, event: &EngineEvent) -> Result<(), axum::Error> {
-    let Ok(payload) = serde_json::to_string(event) else {
+    let message = OutboundMessage::from(event.clone());
+    let Ok(payload) = serde_json::to_string(&message) else {
         tracing::error!("failed to serialize engine event");
         return Ok(());
     };

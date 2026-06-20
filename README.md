@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one in-memory orderbook, serialized engine command worker, account-aware self-trade prevention, integer tick/lot/risk validation, limit/market/market-by-notional/post-only/stop orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
+The first version keeps the business surface intentionally simple: one in-memory orderbook, serialized engine command worker, protocol envelopes, account-aware self-trade prevention, integer tick/lot/risk validation, limit/market/market-by-notional/post-only/stop/FOK orders, GTC/IOC/FOK time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
 
 ## Shape
 
@@ -89,6 +89,7 @@ Prices and quantities are unsigned integers. In a real venue these should repres
 Supported order `type` values are `limit`, `market`, `market_by_notional`, `post_only`, `stop_limit`, and `stop_market`.
 `market_by_notional` is buy-side and uses `quote_quantity` instead of base `quantity`.
 Stop orders use `stop_price`; stop-limit also uses `price`.
+Supported `time_in_force` values are `gtc`, `ioc`, and `fok`.
 Orders accept an optional `account_id`; when omitted, the order is anonymous for backward-compatible local testing.
 The matcher prevents trades between resting and taking orders that carry the same non-empty account id.
 
@@ -117,6 +118,7 @@ This repo is configured as a Rust-first project:
 - Criterion benchmarks cover add-only, crossing, cancel, and mixed workloads.
 - Phase 3 benchmark coverage also includes snapshot depth, risk rejection, metrics, and snapshot capture workloads.
 - API integration tests cover matching, active orders, cancel, persisted history, event journal, deterministic replay, command-worker transport, and account-aware self-trade prevention.
+- Performance guard tests cover crossing and snapshot workloads with explicit latency guardrails.
 
 Recommended local loop:
 

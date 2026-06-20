@@ -8,9 +8,12 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Integer price/quantity ticks and lot validation.
 - Price-time priority matching with FIFO queues inside each price level.
 - Limit, market, market-by-notional, post-only, stop-limit, and stop-market orders.
-- GTC and IOC time-in-force.
+- GTC, IOC, and FOK time-in-force.
 - Order cancel, cancel-replace, mass cancel, active order index, and active order reads.
 - Account-aware self-trade prevention.
+- Protocol envelope module for inbound/outbound messages.
+- Account blocklist and per-account open order risk hooks.
+- Performance guard tests for crossing and snapshot workloads.
 - Dedicated in-memory sequencer, trades, enriched snapshots, and order lifecycle history.
 - Serialized command worker for concurrent producer threads and API transport.
 - Complete engine snapshot restore and deterministic event-journal replay.
@@ -22,14 +25,13 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 ## Reference Features Still Missing
 
 - Full risk layer with exposure limits and venue policy hooks.
-- Additional advanced order types such as reduce-only and fill-or-kill.
+- Position-aware reduce-only orders.
 - Wire protocol modules for inbound/outbound messages.
 - Allocation budget tests with a custom allocator.
 - Larger example suite and user guide.
 
 ## Next Alignment Order
 
-1. Add more advanced order types.
-2. Add wire protocol modules.
-3. Add allocation/performance guard tests.
-4. Add larger example suite and user guide.
+1. Add position-aware reduce-only orders.
+2. Add allocation-budget tests with a custom allocator.
+3. Add larger example suite and user guide.

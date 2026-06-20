@@ -28,9 +28,10 @@ Phase 4 adds advanced architecture:
 
 - Serialized concurrency command worker.
 - REST/WebSocket transport routed through the serialized engine worker.
+- Versionable inbound/outbound protocol message envelope types.
 - Dedicated sequencer.
 - Account-aware self-trade prevention.
-- Advanced order types such as post-only, market-by-notional buy, stop-limit, and stop-market orders.
+- Advanced order types such as post-only, market-by-notional buy, stop-limit, stop-market, and fill-or-kill orders.
 
 ## Reference Alignment
 
@@ -39,12 +40,15 @@ Phase 4 adds advanced architecture:
 - Matching is price-time priority: best price first, FIFO inside a price level.
 - Market-by-notional orders consume ask liquidity using a quote budget instead of base quantity.
 - Stop orders rest dormant outside visible book depth and activate after trade price crosses `stop_price`.
+- Fill-or-kill orders pre-check visible matchable depth before any mutation.
 - Time-in-force starts with GTC and IOC, matching the reference repo's order-lifecycle direction.
 - Orders can carry an `account_id`; the matcher blocks self-trades for matching non-empty account ids without allowing crossed resting books.
 - Every accepted order and trade advances through a dedicated in-memory sequencer.
 - Snapshots are explicit DTOs and are safe to stream over REST/WebSocket.
 - Validation returns typed errors rather than free-form strings, including tick/lot and configurable risk rejects.
+- Risk policy hooks include account blocklists and per-account open order limits.
 - Benchmarks and unit tests live with the engine.
+- Integration-level performance guard tests catch obvious latency regressions.
 
 Current Rust engine modules:
 

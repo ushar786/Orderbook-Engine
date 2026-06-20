@@ -210,23 +210,33 @@ function connect() {
 
   ws.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
-    if (message.event === "book") {
+    const engineEvent = message.type === "event" ? message.data : message;
+    if (message.type === "book") {
       state.book = message.data;
       renderBook();
       touchUpdated();
     }
-    if (message.event === "order") {
-      applyOrderAck(message.data);
-    }
-    if (message.event === "trade") {
+    if (message.type === "trade") {
       upsertTrade(message.data);
       renderTrades();
     }
-    if (message.event === "cancel") {
-      markCancelled(message.order_id);
+    if (engineEvent.event === "book") {
+      state.book = engineEvent.data;
+      renderBook();
+      touchUpdated();
     }
-    if (message.event === "mass_cancel") {
-      message.data.cancelled_order_ids.forEach(markCancelled);
+    if (engineEvent.event === "order") {
+      applyOrderAck(engineEvent.data);
+    }
+    if (engineEvent.event === "trade") {
+      upsertTrade(engineEvent.data);
+      renderTrades();
+    }
+    if (engineEvent.event === "cancel") {
+      markCancelled(engineEvent.order_id);
+    }
+    if (engineEvent.event === "mass_cancel") {
+      engineEvent.data.cancelled_order_ids.forEach(markCancelled);
     }
   });
 }

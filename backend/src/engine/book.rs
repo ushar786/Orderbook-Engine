@@ -34,6 +34,8 @@ pub struct RiskConfig {
     pub max_order_quantity: Option<Quantity>,
     pub max_order_notional: Option<u64>,
     pub max_open_orders: Option<usize>,
+    pub max_open_orders_per_account: Option<usize>,
+    pub blocked_accounts: Vec<String>,
 }
 
 impl BookConfig {
@@ -48,6 +50,8 @@ impl BookConfig {
                 max_order_quantity: Some(1_000_000),
                 max_order_notional: Some(10_000_000_000),
                 max_open_orders: Some(100_000),
+                max_open_orders_per_account: Some(10_000),
+                blocked_accounts: Vec::new(),
             },
         }
     }
@@ -102,6 +106,7 @@ impl OrderBook {
             self.config.tick_size,
             self.config.lot_size,
             self.active_order_count(),
+            self.active_order_count_for_account(&request.account_id),
             &self.config.risk,
         ) {
             let order_id = self.allocate_order_id();
@@ -153,6 +158,22 @@ impl OrderBook {
             let ack = OrderAck {
                 order: taker,
                 status: OrderStatus::Resting,
+                trades: Vec::new(),
+            };
+            let events = vec![
+                EngineEvent::Order { data: ack.clone() },
+                EngineEvent::Book {
+                    data: self.snapshot(self.config.default_depth),
+                },
+            ];
+            return Ok(MatchOutcome { ack, events });
+        }
+
+        if taker.time_in_force == TimeInForce::Fok && !self.can_fully_fill(&taker) {
+            self.record_status(&taker, OrderStatus::Rejected);
+            let ack = OrderAck {
+                order: taker,
+                status: OrderStatus::Rejected,
                 trades: Vec::new(),
             };
             let events = vec![
@@ -403,6 +424,16 @@ impl OrderBook {
         self.order_index.len() + self.stop_orders.len()
     }
 
+    fn active_order_count_for_account(&self, account_id: &str) -> usize {
+        if account_id.is_empty() {
+            return 0;
+        }
+        self.active_orders()
+            .into_iter()
+            .filter(|order| order.account_id == account_id)
+            .count()
+    }
+
     pub fn active_orders(&self) -> Vec<Order> {
         self.stop_orders
             .values()
@@ -488,6 +519,43 @@ impl OrderBook {
                     && level.has_order_for_account(&order.account_id)
             }),
         }
+    }
+
+    fn can_fully_fill(&self, order: &Order) -> bool {
+        if order.kind == OrderKind::MarketByNotional {
+            return false;
+        }
+        let mut remaining = order.remaining_quantity;
+        match order.side {
+            Side::Buy => {
+                for (price, level) in &self.asks {
+                    if matches!(order.kind, OrderKind::Limit | OrderKind::PostOnly)
+                        && order.price.is_some_and(|limit| *price > limit)
+                    {
+                        break;
+                    }
+                    remaining = remaining.saturating_sub(level.matchable_depth(&order.account_id));
+                    if remaining == 0 {
+                        return true;
+                    }
+                }
+            }
+            Side::Sell => {
+                for (price, level) in &self.bids {
+                    let price = price.0;
+                    if matches!(order.kind, OrderKind::Limit | OrderKind::PostOnly)
+                        && order.price.is_some_and(|limit| price < limit)
+                    {
+                        break;
+                    }
+                    remaining = remaining.saturating_sub(level.matchable_depth(&order.account_id));
+                    if remaining == 0 {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn apply_replay_event(&mut self, event: EngineEvent) {
@@ -761,6 +829,19 @@ mod tests {
         }
     }
 
+    fn fok(side: Side, price: Price, quantity: Quantity) -> NewOrder {
+        NewOrder {
+            account_id: String::new(),
+            side,
+            kind: OrderKind::Limit,
+            time_in_force: TimeInForce::Fok,
+            price: Some(price),
+            stop_price: None,
+            quantity,
+            quote_quantity: None,
+        }
+    }
+
     #[test]
     fn matches_crossing_limit_orders_fifo() {
         let mut book = OrderBook::new("BTC-USD");
@@ -879,6 +960,64 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, MatchError::UnsupportedSide);
+    }
+
+    #[test]
+    fn fill_or_kill_rejects_when_full_quantity_is_unavailable() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Sell, 100, 2)).unwrap();
+
+        let outcome = book.submit(fok(Side::Buy, 100, 3)).unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Rejected);
+        assert!(outcome.ack.trades.is_empty());
+        assert_eq!(book.snapshot(5).ask_depth, 2);
+    }
+
+    #[test]
+    fn fill_or_kill_executes_when_full_quantity_is_available() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Sell, 100, 2)).unwrap();
+
+        let outcome = book.submit(fok(Side::Buy, 100, 2)).unwrap();
+
+        assert_eq!(outcome.ack.status, OrderStatus::Filled);
+        assert_eq!(outcome.ack.trades.len(), 1);
+        assert_eq!(book.snapshot(5).ask_depth, 0);
+    }
+
+    #[test]
+    fn risk_policy_blocks_account_and_account_open_order_limit() {
+        let mut blocked = OrderBook::with_config(BookConfig {
+            risk: RiskConfig {
+                blocked_accounts: vec!["acct-blocked".to_string()],
+                ..RiskConfig::default()
+            },
+            ..BookConfig::btc_usd()
+        });
+        assert_eq!(
+            blocked
+                .submit(limit_for("acct-blocked", Side::Buy, 99, 1))
+                .unwrap_err(),
+            MatchError::AccountBlocked
+        );
+
+        let mut limited = OrderBook::with_config(BookConfig {
+            risk: RiskConfig {
+                max_open_orders_per_account: Some(1),
+                ..RiskConfig::default()
+            },
+            ..BookConfig::btc_usd()
+        });
+        limited
+            .submit(limit_for("acct-a", Side::Buy, 99, 1))
+            .unwrap();
+        assert_eq!(
+            limited
+                .submit(limit_for("acct-a", Side::Buy, 98, 1))
+                .unwrap_err(),
+            MatchError::MaxAccountOpenOrdersExceeded
+        );
     }
 
     #[test]
@@ -1018,6 +1157,7 @@ mod tests {
                 max_order_quantity: Some(100),
                 max_order_notional: Some(10_000),
                 max_open_orders: Some(1),
+                ..RiskConfig::default()
             },
             ..BookConfig::btc_usd()
         });

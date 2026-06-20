@@ -903,6 +903,7 @@ fn time_in_force_to_db(time_in_force: TimeInForce) -> &'static str {
     match time_in_force {
         TimeInForce::Gtc => "gtc",
         TimeInForce::Ioc => "ioc",
+        TimeInForce::Fok => "fok",
     }
 }
 

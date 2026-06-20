@@ -116,6 +116,7 @@ fn risk_rejections(c: &mut Criterion) {
                     max_order_quantity: Some(100),
                     max_order_notional: Some(10_000),
                     max_open_orders: Some(1_000),
+                    ..RiskConfig::default()
                 },
                 ..BookConfig::btc_usd()
             });

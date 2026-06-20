@@ -67,4 +67,12 @@ impl PriceLevel {
             .map(|order| order.remaining_quantity)
             .sum()
     }
+
+    pub fn matchable_depth(&self, account_id: &str) -> Quantity {
+        self.orders
+            .iter()
+            .filter(|order| account_id.is_empty() || order.account_id != account_id)
+            .map(|order| order.remaining_quantity)
+            .sum()
+    }
 }

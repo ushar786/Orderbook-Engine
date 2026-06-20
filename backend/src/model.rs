@@ -33,6 +33,7 @@ pub enum TimeInForce {
     #[default]
     Gtc,
     Ioc,
+    Fok,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
