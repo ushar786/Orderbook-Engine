@@ -17,8 +17,10 @@ const els = {
   type: document.querySelector("#orderType"),
   timeInForce: document.querySelector("#timeInForce"),
   price: document.querySelector("#price"),
+  stopPrice: document.querySelector("#stopPrice"),
   quantity: document.querySelector("#quantity"),
   priceField: document.querySelector("#priceField"),
+  stopField: document.querySelector("#stopField"),
   quoteField: document.querySelector("#quoteField"),
   quoteQuantity: document.querySelector("#quoteQuantity"),
   cancelOrderId: document.querySelector("#cancelOrderId"),
@@ -79,11 +81,18 @@ els.form.addEventListener("submit", async (event) => {
     }
   }
 
-  if (payload.type === "limit" || payload.type === "post_only") {
+  if (payload.type === "limit" || payload.type === "post_only" || payload.type === "stop_limit") {
     payload.price = readPositiveInteger(els.price.value);
     if (!payload.price) {
       setBusy(false);
       return setMessage("price must be a positive integer", true);
+    }
+  }
+  if (payload.type === "stop_limit" || payload.type === "stop_market") {
+    payload.stop_price = readPositiveInteger(els.stopPrice.value);
+    if (!payload.stop_price) {
+      setBusy(false);
+      return setMessage("stop price must be a positive integer", true);
     }
   }
 
@@ -447,7 +456,9 @@ function setBusy(isBusy) {
 
 function syncTicketFields() {
   const isMarketByNotional = els.type.value === "market_by_notional";
-  els.priceField.hidden = els.type.value === "market" || isMarketByNotional;
+  const isStop = els.type.value === "stop_limit" || els.type.value === "stop_market";
+  els.priceField.hidden = els.type.value === "market" || isMarketByNotional || els.type.value === "stop_market";
+  els.stopField.hidden = !isStop;
   els.quantity.closest("label").hidden = isMarketByNotional;
   els.quoteField.hidden = !isMarketByNotional;
 }

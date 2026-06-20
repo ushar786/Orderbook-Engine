@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS orders (
     type TEXT NOT NULL,
     time_in_force TEXT NOT NULL DEFAULT 'gtc',
     price BIGINT,
+    stop_price BIGINT,
     original_quantity BIGINT NOT NULL,
     remaining_quantity BIGINT NOT NULL,
     original_quote_quantity BIGINT,

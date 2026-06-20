@@ -2,7 +2,7 @@
 
 A compact, production-shaped single-book matching engine modeled after [`OrderBook-rs`](https://github.com/joaquinbejar/OrderBook-rs).
 
-The first version keeps the business surface intentionally simple: one in-memory orderbook, serialized engine command worker, account-aware self-trade prevention, integer tick/lot/risk validation, limit/market/market-by-notional/post-only orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
+The first version keeps the business surface intentionally simple: one in-memory orderbook, serialized engine command worker, account-aware self-trade prevention, integer tick/lot/risk validation, limit/market/market-by-notional/post-only/stop orders, GTC/IOC time-in-force, FIFO matching inside each price level, enriched snapshots, REST APIs, WebSocket updates, SQLite/PostgreSQL audit storage, and a static frontend.
 
 ## Shape
 
@@ -86,8 +86,9 @@ The server creates the same schema at startup for both backends. SQL copies live
 - `GET /ws` upgrades to a WebSocket stream for book, trade, order, and cancel events.
 
 Prices and quantities are unsigned integers. In a real venue these should represent fixed-point ticks and lots.
-Supported order `type` values are `limit`, `market`, `market_by_notional`, and `post_only`.
+Supported order `type` values are `limit`, `market`, `market_by_notional`, `post_only`, `stop_limit`, and `stop_market`.
 `market_by_notional` is buy-side and uses `quote_quantity` instead of base `quantity`.
+Stop orders use `stop_price`; stop-limit also uses `price`.
 Orders accept an optional `account_id`; when omitted, the order is anonymous for backward-compatible local testing.
 The matcher prevents trades between resting and taking orders that carry the same non-empty account id.
 

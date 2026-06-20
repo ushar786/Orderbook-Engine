@@ -71,6 +71,8 @@
                 <option value="market">Market</option>
                 <option value="market_by_notional">Market By Notional</option>
                 <option value="post_only">Post Only</option>
+                <option value="stop_limit">Stop Limit</option>
+                <option value="stop_market">Stop Market</option>
               </select>
             </label>
 
@@ -85,6 +87,11 @@
             <label id="priceField">
               <span>Price</span>
               <input id="price" type="number" min="1" step="1" value="10000" />
+            </label>
+
+            <label id="stopField" hidden>
+              <span>Stop Price</span>
+              <input id="stopPrice" type="number" min="1" step="1" value="10000" />
             </label>
 
             <label>

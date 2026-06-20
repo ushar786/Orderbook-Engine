@@ -68,6 +68,7 @@ pub struct OrderBook {
     pub(super) bids: BTreeMap<Reverse<Price>, PriceLevel>,
     pub(super) asks: BTreeMap<Price, PriceLevel>,
     pub(super) order_index: HashMap<OrderId, (Side, Price)>,
+    pub(super) stop_orders: HashMap<OrderId, Order>,
     pub(super) order_history: OrderHistory,
     pub(super) recent_trades: VecDeque<Trade>,
 }
@@ -89,6 +90,7 @@ impl OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
             order_index: HashMap::new(),
+            stop_orders: HashMap::new(),
             order_history: HashMap::new(),
             recent_trades: VecDeque::with_capacity(256),
         }
@@ -110,6 +112,7 @@ impl OrderBook {
                 kind: request.kind,
                 time_in_force: request.time_in_force,
                 price: request.price,
+                stop_price: request.stop_price,
                 original_quantity: request.quantity,
                 remaining_quantity: request.quantity,
                 original_quote_quantity: request.quote_quantity,
@@ -121,20 +124,21 @@ impl OrderBook {
         }
 
         let price = match request.kind {
-            OrderKind::Limit | OrderKind::PostOnly => {
+            OrderKind::Limit | OrderKind::PostOnly | OrderKind::StopLimit => {
                 Some(request.price.ok_or(MatchError::MissingLimitPrice)?)
             }
-            OrderKind::Market | OrderKind::MarketByNotional => None,
+            OrderKind::Market | OrderKind::MarketByNotional | OrderKind::StopMarket => None,
         };
 
         let order_id = self.allocate_order_id();
-        let mut taker = Order {
+        let taker = Order {
             id: order_id,
             account_id: request.account_id,
             side: request.side,
             kind: request.kind,
             time_in_force: request.time_in_force,
             price,
+            stop_price: request.stop_price,
             original_quantity: request.quantity,
             remaining_quantity: request.quantity,
             original_quote_quantity: request.quote_quantity,
@@ -143,6 +147,27 @@ impl OrderBook {
         };
         self.record_status(&taker, OrderStatus::Accepted);
 
+        if is_stop_order(taker.kind) {
+            self.stop_orders.insert(taker.id, taker.clone());
+            self.record_status(&taker, OrderStatus::Resting);
+            let ack = OrderAck {
+                order: taker,
+                status: OrderStatus::Resting,
+                trades: Vec::new(),
+            };
+            let events = vec![
+                EngineEvent::Order { data: ack.clone() },
+                EngineEvent::Book {
+                    data: self.snapshot(self.config.default_depth),
+                },
+            ];
+            return Ok(MatchOutcome { ack, events });
+        }
+
+        Ok(self.execute_taker(taker))
+    }
+
+    fn execute_taker(&mut self, mut taker: Order) -> MatchOutcome {
         if taker.kind == OrderKind::PostOnly && self.would_cross(&taker) {
             self.record_status(&taker, OrderStatus::Rejected);
             let ack = OrderAck {
@@ -156,7 +181,7 @@ impl OrderBook {
                     data: self.snapshot(self.config.default_depth),
                 },
             ];
-            return Ok(MatchOutcome { ack, events });
+            return MatchOutcome { ack, events };
         }
 
         let trades = match taker.side {
@@ -207,14 +232,24 @@ impl OrderBook {
             data: self.snapshot(self.config.default_depth),
         });
 
-        Ok(MatchOutcome { ack, events })
+        let trigger_price = ack.trades.last().map(|trade| trade.price);
+        if let Some(trigger_price) = trigger_price {
+            events.extend(self.trigger_stop_orders(trigger_price));
+        }
+
+        MatchOutcome { ack, events }
     }
 
     pub fn cancel(&mut self, order_id: OrderId) -> Result<Order, MatchError> {
-        let (side, price) = self
-            .order_index
-            .remove(&order_id)
-            .ok_or(MatchError::OrderNotFound)?;
+        let Some((side, price)) = self.order_index.remove(&order_id) else {
+            let cancelled = self
+                .stop_orders
+                .remove(&order_id)
+                .ok_or(MatchError::OrderNotFound)?;
+            self.next_sequence();
+            self.record_status(&cancelled, OrderStatus::Cancelled);
+            return Ok(cancelled);
+        };
 
         let removed = match side {
             Side::Buy => remove_from_level(&mut self.bids, Reverse(price), order_id),
@@ -227,7 +262,12 @@ impl OrderBook {
     }
 
     pub fn cancel_all(&mut self) -> Vec<Order> {
-        let order_ids: Vec<OrderId> = self.order_index.keys().copied().collect();
+        let order_ids: Vec<OrderId> = self
+            .order_index
+            .keys()
+            .chain(self.stop_orders.keys())
+            .copied()
+            .collect();
         order_ids
             .into_iter()
             .filter_map(|order_id| self.cancel(order_id).ok())
@@ -310,7 +350,7 @@ impl OrderBook {
             .collect();
 
         for order in snapshot.active_orders {
-            book.rest(order);
+            book.rest_active_order(order);
         }
         book
     }
@@ -360,14 +400,18 @@ impl OrderBook {
     }
 
     pub fn active_order_count(&self) -> usize {
-        self.order_index.len()
+        self.order_index.len() + self.stop_orders.len()
     }
 
     pub fn active_orders(&self) -> Vec<Order> {
-        self.bids
+        self.stop_orders
             .values()
-            .chain(self.asks.values())
-            .flat_map(PriceLevel::orders)
+            .chain(
+                self.bids
+                    .values()
+                    .chain(self.asks.values())
+                    .flat_map(PriceLevel::orders),
+            )
             .cloned()
             .collect()
     }
@@ -377,6 +421,14 @@ impl OrderBook {
     }
 
     fn rest(&mut self, order: Order) {
+        self.rest_active_order(order);
+    }
+
+    fn rest_active_order(&mut self, order: Order) {
+        if is_stop_order(order.kind) {
+            self.stop_orders.insert(order.id, order);
+            return;
+        }
         let Some(price) = order.price else {
             return;
         };
@@ -385,6 +437,31 @@ impl OrderBook {
             Side::Buy => self.bids.entry(Reverse(price)).or_default().push(order),
             Side::Sell => self.asks.entry(price).or_default().push(order),
         }
+    }
+
+    fn trigger_stop_orders(&mut self, trade_price: Price) -> Vec<EngineEvent> {
+        let mut triggered = self
+            .stop_orders
+            .values()
+            .filter(|order| stop_triggered(order, trade_price))
+            .map(|order| order.id)
+            .collect::<Vec<_>>();
+        triggered.sort_unstable();
+
+        let mut events = Vec::new();
+        for order_id in triggered {
+            let Some(mut order) = self.stop_orders.remove(&order_id) else {
+                continue;
+            };
+            order.kind = match order.kind {
+                OrderKind::StopLimit => OrderKind::Limit,
+                OrderKind::StopMarket => OrderKind::Market,
+                kind => kind,
+            };
+            let outcome = self.execute_taker(order);
+            events.extend(outcome.events);
+        }
+        events
     }
 
     fn would_cross(&self, order: &Order) -> bool {
@@ -484,6 +561,9 @@ impl OrderBook {
     }
 
     fn remove_active_order(&mut self, order_id: OrderId) -> Option<Order> {
+        if let Some(order) = self.stop_orders.remove(&order_id) {
+            return Some(order);
+        }
         let (side, price) = self.order_index.remove(&order_id)?;
         match side {
             Side::Buy => remove_from_level(&mut self.bids, Reverse(price), order_id),
@@ -593,6 +673,20 @@ fn taker_is_filled(taker: &Order) -> bool {
     }
 }
 
+fn is_stop_order(kind: OrderKind) -> bool {
+    matches!(kind, OrderKind::StopLimit | OrderKind::StopMarket)
+}
+
+fn stop_triggered(order: &Order, trade_price: Price) -> bool {
+    let Some(stop_price) = order.stop_price else {
+        return false;
+    };
+    match order.side {
+        Side::Buy => trade_price >= stop_price,
+        Side::Sell => trade_price <= stop_price,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -609,6 +703,7 @@ mod tests {
             kind: OrderKind::Limit,
             time_in_force: TimeInForce::Gtc,
             price: Some(price),
+            stop_price: None,
             quantity,
             quote_quantity: None,
         }
@@ -621,6 +716,7 @@ mod tests {
             kind: OrderKind::PostOnly,
             time_in_force: TimeInForce::Gtc,
             price: Some(price),
+            stop_price: None,
             quantity,
             quote_quantity: None,
         }
@@ -633,8 +729,35 @@ mod tests {
             kind: OrderKind::MarketByNotional,
             time_in_force: TimeInForce::Gtc,
             price: None,
+            stop_price: None,
             quantity: 0,
             quote_quantity: Some(quote_quantity),
+        }
+    }
+
+    fn stop_limit(side: Side, stop_price: Price, price: Price, quantity: Quantity) -> NewOrder {
+        NewOrder {
+            account_id: String::new(),
+            side,
+            kind: OrderKind::StopLimit,
+            time_in_force: TimeInForce::Gtc,
+            price: Some(price),
+            stop_price: Some(stop_price),
+            quantity,
+            quote_quantity: None,
+        }
+    }
+
+    fn stop_market(side: Side, stop_price: Price, quantity: Quantity) -> NewOrder {
+        NewOrder {
+            account_id: String::new(),
+            side,
+            kind: OrderKind::StopMarket,
+            time_in_force: TimeInForce::Gtc,
+            price: None,
+            stop_price: Some(stop_price),
+            quantity,
+            quote_quantity: None,
         }
     }
 
@@ -720,6 +843,7 @@ mod tests {
                 kind: OrderKind::Market,
                 time_in_force: TimeInForce::Gtc,
                 price: None,
+                stop_price: None,
                 quantity: 5,
                 quote_quantity: None,
             })
@@ -755,6 +879,50 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, MatchError::UnsupportedSide);
+    }
+
+    #[test]
+    fn stop_limit_rests_dormant_then_triggers_after_trade_price_crosses_stop() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Sell, 100, 1)).unwrap();
+        let stop = book.submit(stop_limit(Side::Buy, 100, 101, 2)).unwrap().ack;
+
+        assert_eq!(stop.status, OrderStatus::Resting);
+        assert_eq!(stop.order.kind, OrderKind::StopLimit);
+        assert_eq!(book.active_order_count(), 2);
+        assert_eq!(book.snapshot(5).bid_depth, 0);
+
+        let trigger = book.submit(limit(Side::Buy, 100, 1)).unwrap();
+
+        assert_eq!(trigger.ack.status, OrderStatus::Filled);
+        assert_eq!(book.active_orders().len(), 1);
+        let triggered_order = book.active_orders().pop().unwrap();
+        assert_eq!(triggered_order.id, stop.order.id);
+        assert_eq!(triggered_order.kind, OrderKind::Limit);
+        assert_eq!(triggered_order.price, Some(101));
+        assert_eq!(book.snapshot(5).best_bid, Some(101));
+    }
+
+    #[test]
+    fn stop_market_triggers_into_market_execution() {
+        let mut book = OrderBook::new("BTC-USD");
+        book.submit(limit(Side::Sell, 100, 1)).unwrap();
+        let stop = book
+            .submit(stop_market(Side::Buy, 100, 2))
+            .unwrap()
+            .ack
+            .order;
+        book.submit(limit(Side::Sell, 101, 2)).unwrap();
+
+        let trigger = book.submit(limit(Side::Buy, 100, 1)).unwrap();
+
+        assert_eq!(trigger.ack.status, OrderStatus::Filled);
+        assert!(
+            book.get_order_history(stop.id)
+                .iter()
+                .any(|entry| entry.status == OrderStatus::Filled)
+        );
+        assert_eq!(book.snapshot(5).ask_depth, 0);
     }
 
     #[test]
@@ -1007,6 +1175,7 @@ mod tests {
                 kind: OrderKind::Limit,
                 time_in_force: TimeInForce::Ioc,
                 price: Some(100),
+                stop_price: None,
                 quantity: 5,
                 quote_quantity: None,
             })
@@ -1036,6 +1205,7 @@ mod tests {
                     kind: OrderKind::Limit,
                     time_in_force: TimeInForce::Gtc,
                     price: Some(100),
+                    stop_price: None,
                     quantity: 4,
                     quote_quantity: None,
                 },

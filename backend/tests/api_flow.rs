@@ -415,6 +415,36 @@ async fn api_accepts_market_by_notional_buy_orders() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn api_triggers_stop_limit_orders() {
+    let (app, _state) = test_app();
+
+    post_order(
+        app.clone(),
+        r#"{"side":"sell","type":"limit","price":10000,"quantity":1}"#,
+    )
+    .await;
+    let stop = post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"stop_limit","stop_price":10000,"price":10100,"quantity":2}"#,
+    )
+    .await;
+    assert_eq!(stop["status"], "resting");
+    assert_eq!(stop["order"]["kind"], "stop_limit");
+
+    post_order(
+        app.clone(),
+        r#"{"side":"buy","type":"limit","price":10000,"quantity":1}"#,
+    )
+    .await;
+
+    let active = get_json(app, "/api/orders").await;
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["order"]["id"], stop["order"]["id"]);
+    assert_eq!(active[0]["order"]["kind"], "limit");
+    assert_eq!(active[0]["order"]["price"], 10100);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_prevents_self_trades_by_account_id() {
     let (app, _state) = test_app();
 

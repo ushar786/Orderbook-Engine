@@ -28,7 +28,10 @@ pub fn validate_order(
 
     validate_base_quantity(request.quantity, lot_size, risk)?;
 
-    if matches!(request.kind, OrderKind::Limit | OrderKind::PostOnly) {
+    if matches!(
+        request.kind,
+        OrderKind::Limit | OrderKind::PostOnly | OrderKind::StopLimit
+    ) {
         let price = request
             .price
             .filter(|price| *price > 0)
@@ -46,6 +49,15 @@ pub fn validate_order(
             && active_order_count >= max_open_orders
         {
             return Err(MatchError::MaxOpenOrdersExceeded);
+        }
+    }
+    if matches!(request.kind, OrderKind::StopLimit | OrderKind::StopMarket) {
+        let stop_price = request
+            .stop_price
+            .filter(|price| *price > 0)
+            .ok_or(MatchError::MissingStopPrice)?;
+        if !stop_price.is_multiple_of(tick_size) {
+            return Err(MatchError::InvalidTick);
         }
     }
     Ok(())

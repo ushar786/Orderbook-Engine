@@ -156,6 +156,7 @@ impl SqliteDatabase {
             &conn,
             "ALTER TABLE orders ADD COLUMN remaining_quote_quantity INTEGER",
         )?;
+        sqlite_add_column_if_missing(&conn, "ALTER TABLE orders ADD COLUMN stop_price INTEGER")?;
         Ok(Self { conn })
     }
 
@@ -337,6 +338,7 @@ impl PostgresDatabase {
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT '';
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS original_quote_quantity BIGINT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS remaining_quote_quantity BIGINT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_price BIGINT;
             "#,
         )?;
         Ok(Self {
@@ -520,6 +522,7 @@ CREATE TABLE IF NOT EXISTS orders (
     type TEXT NOT NULL,
     time_in_force TEXT NOT NULL DEFAULT 'gtc',
     price INTEGER,
+    stop_price INTEGER,
     original_quantity INTEGER NOT NULL,
     remaining_quantity INTEGER NOT NULL,
     original_quote_quantity INTEGER,
@@ -580,6 +583,7 @@ CREATE TABLE IF NOT EXISTS orders (
     type TEXT NOT NULL,
     time_in_force TEXT NOT NULL DEFAULT 'gtc',
     price BIGINT,
+    stop_price BIGINT,
     original_quantity BIGINT NOT NULL,
     remaining_quantity BIGINT NOT NULL,
     original_quote_quantity BIGINT,
@@ -640,9 +644,9 @@ fn sqlite_upsert_order(
     conn.execute(
         r#"
         INSERT INTO orders (
-            id, account_id, side, type, time_in_force, price, original_quantity, remaining_quantity, original_quote_quantity, remaining_quote_quantity, status, created_at_seq
+            id, account_id, side, type, time_in_force, price, stop_price, original_quantity, remaining_quantity, original_quote_quantity, remaining_quote_quantity, status, created_at_seq
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ON CONFLICT(id) DO UPDATE SET
             account_id = excluded.account_id,
             time_in_force = excluded.time_in_force,
@@ -658,6 +662,7 @@ fn sqlite_upsert_order(
             order_kind_to_db(order.kind),
             time_in_force_to_db(order.time_in_force),
             order.price,
+            order.stop_price,
             order.original_quantity,
             order.remaining_quantity,
             order.original_quote_quantity,
@@ -753,9 +758,9 @@ where
     client.execute(
         r#"
         INSERT INTO orders (
-            id, account_id, side, type, time_in_force, price, original_quantity, remaining_quantity, original_quote_quantity, remaining_quote_quantity, status, created_at_seq
+            id, account_id, side, type, time_in_force, price, stop_price, original_quantity, remaining_quantity, original_quote_quantity, remaining_quote_quantity, status, created_at_seq
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT(id) DO UPDATE SET
             account_id = EXCLUDED.account_id,
             time_in_force = EXCLUDED.time_in_force,
@@ -771,6 +776,7 @@ where
             &order_type,
             &time_in_force,
             &price,
+            &order.stop_price.map(to_i64),
             &to_i64(order.original_quantity),
             &to_i64(order.remaining_quantity),
             &order.original_quote_quantity.map(to_i64),
@@ -906,6 +912,8 @@ fn order_kind_to_db(kind: crate::model::OrderKind) -> &'static str {
         crate::model::OrderKind::Market => "market",
         crate::model::OrderKind::MarketByNotional => "market_by_notional",
         crate::model::OrderKind::PostOnly => "post_only",
+        crate::model::OrderKind::StopLimit => "stop_limit",
+        crate::model::OrderKind::StopMarket => "stop_market",
     }
 }
 

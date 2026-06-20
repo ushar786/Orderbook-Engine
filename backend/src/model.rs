@@ -23,6 +23,8 @@ pub enum OrderKind {
     Market,
     MarketByNotional,
     PostOnly,
+    StopLimit,
+    StopMarket,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +48,8 @@ pub struct NewOrder {
     pub quote_quantity: Option<Quantity>,
     pub price: Option<Price>,
     #[serde(default)]
+    pub stop_price: Option<Price>,
+    #[serde(default)]
     pub time_in_force: TimeInForce,
 }
 
@@ -62,6 +66,8 @@ pub struct ReplaceOrder {
     pub quote_quantity: Option<Quantity>,
     pub price: Option<Price>,
     #[serde(default)]
+    pub stop_price: Option<Price>,
+    #[serde(default)]
     pub time_in_force: TimeInForce,
 }
 
@@ -74,6 +80,7 @@ impl From<ReplaceOrder> for NewOrder {
             quantity: value.quantity,
             quote_quantity: value.quote_quantity,
             price: value.price,
+            stop_price: value.stop_price,
             time_in_force: value.time_in_force,
         }
     }
@@ -88,6 +95,8 @@ pub struct Order {
     pub kind: OrderKind,
     pub time_in_force: TimeInForce,
     pub price: Option<Price>,
+    #[serde(default)]
+    pub stop_price: Option<Price>,
     pub original_quantity: Quantity,
     pub remaining_quantity: Quantity,
     #[serde(default)]

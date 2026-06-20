@@ -293,6 +293,7 @@ mod tests {
             kind: OrderKind::Limit,
             time_in_force: TimeInForce::Gtc,
             price: Some(price),
+            stop_price: None,
             quantity,
             quote_quantity: None,
         }

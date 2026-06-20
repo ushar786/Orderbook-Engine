@@ -10,6 +10,8 @@ pub enum MatchError {
     UnsupportedSide,
     #[error("limit orders require a price greater than zero")]
     MissingLimitPrice,
+    #[error("stop orders require a stop price greater than zero")]
+    MissingStopPrice,
     #[error("price is outside configured tick size")]
     InvalidTick,
     #[error("quantity is outside configured lot size")]
