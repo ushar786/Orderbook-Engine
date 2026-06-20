@@ -14,6 +14,7 @@ This project is not an exact copy of `joaquinbejar/OrderBook-rs`; it is a Rust-f
 - Protocol envelope module for inbound/outbound messages.
 - Account blocklist and per-account open order risk hooks.
 - Performance guard tests for crossing and snapshot workloads.
+- CLI binary verified against the running REST backend.
 - Dedicated in-memory sequencer, trades, enriched snapshots, and order lifecycle history.
 - Serialized command worker for concurrent producer threads and API transport.
 - Complete engine snapshot restore and deterministic event-journal replay.

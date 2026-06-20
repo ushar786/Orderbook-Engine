@@ -86,6 +86,9 @@ ORDERBOOK_API=http://127.0.0.1:8080 cargo run --bin orderbook-cli -- metrics
 cargo run --bin orderbook-cli -- --url http://127.0.0.1:8080 trades --limit 20
 ```
 
+Live CLI smoke coverage has been verified against a running backend for health,
+metrics, submit, book, orders, history, and cancel flows.
+
 ## API
 
 - `POST /api/orders` submits an order.
@@ -140,6 +143,7 @@ This repo is configured as a Rust-first project:
 - Phase 3 benchmark coverage also includes snapshot depth, risk rejection, metrics, and snapshot capture workloads.
 - API integration tests cover matching, active orders, cancel, persisted history, event journal, deterministic replay, command-worker transport, and account-aware self-trade prevention.
 - Performance guard tests cover crossing and snapshot workloads with explicit latency guardrails.
+- CLI live smoke flow has been checked against the running REST backend.
 
 Recommended local loop:
 
